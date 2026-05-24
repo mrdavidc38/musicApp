@@ -215,20 +215,24 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val favorites by viewModel.favoriteTracks.collectAsStateWithLifecycle()
 
+    var customPathInput by remember { mutableStateOf("/storage/emulated/0/Music") }
+
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions.values.all { it }
         if (granted) {
-            viewModel.scanLocalMusic()
+            viewModel.scanLocalMusic(customPathInput.trim())
         }
     }
 
-    val requestAndScan = {
+    val checkAndRequestPermissions = { onPermissionGranted: () -> Unit ->
         val permissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
         } else {
-            arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            )
         }
 
         val hasPermission = permissions.all { perm ->
@@ -236,84 +240,9 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
         }
 
         if (hasPermission) {
-            viewModel.scanLocalMusic()
+            onPermissionGranted()
         } else {
             permissionLauncher.launch(permissions)
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column {
-            Text(
-                text = "Biblioteca de Canciones",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.9f)
-            )
-            val localCount = tracks.count { !it.url.startsWith("http") }
-            Text(
-                text = "$localCount locales • ${tracks.size - localCount} streaming",
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.5f)
-            )
-        }
-
-        Button(
-            onClick = { requestAndScan() },
-            enabled = !isScanning,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0x33FFFFFF),
-                contentColor = Color.White
-            ),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.height(36.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "Actualizar",
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Escanear", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-
-    if (isScanning || scanMessage?.isNotEmpty() == true) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0x40000000)),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isScanning) {
-                        CircularProgressIndicator(
-                            color = Color(0xFF00ADB5),
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color.Green,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = scanMessage ?: "",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
         }
     }
 
@@ -321,6 +250,235 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
+        // 1. Prominent Scan Options Card at the absolute top
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            tint = Color(0xFF00ADB5),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Buscador de Música Local",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Text(
+                        text = "Ubica carpetas específicas o realiza un escaneo completo de la memoria para cargar tus archivos MP3 locales.",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        lineHeight = 16.sp
+                    )
+
+                    // Path Input Field
+                    OutlinedTextField(
+                        value = customPathInput,
+                        onValueChange = { customPathInput = it },
+                        label = { Text("Especificar carpeta a escanear", color = Color.White.copy(alpha = 0.6f)) },
+                        placeholder = { Text("/storage/emulated/0/Music", color = Color.White.copy(alpha = 0.4f)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00ADB5),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                            cursorColor = Color(0xFF00ADB5),
+                            focusedLabelColor = Color(0xFF00ADB5)
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                    )
+
+                    // Quick Selection Folder Chips
+                    Text(
+                        text = "Accesos rápidos de carpetas:",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val suggestions = listOf(
+                            "Música" to "/storage/emulated/0/Music",
+                            "Descargas" to "/storage/emulated/0/Download",
+                            "Memoria Raíz" to "/storage/emulated/0"
+                        )
+                        suggestions.forEach { (label, path) ->
+                            val isSelected = customPathInput.trim() == path
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        color = if (isSelected) Color(0xFF00ADB5) else Color(0x22FFFFFF),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { customPathInput = path }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Scan trigger buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Scan Custom Route Check
+                        Button(
+                            onClick = {
+                                checkAndRequestPermissions {
+                                    viewModel.scanLocalMusic(customPathInput.trim())
+                                }
+                            },
+                            enabled = !isScanning,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00ADB5),
+                                contentColor = Color.White,
+                                disabledContainerColor = Color(0x3300ADB5)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Escanear Carpeta",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Complete storage sweep check
+                        Button(
+                            onClick = {
+                                checkAndRequestPermissions {
+                                    viewModel.scanLocalMusic(null)
+                                }
+                            },
+                            enabled = !isScanning,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0x33FFFFFF),
+                                contentColor = Color.White,
+                                disabledContainerColor = Color(0x11FFFFFF)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhoneAndroid,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Escanear Todo",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Feedback Card
+        if (isScanning || scanMessage?.isNotEmpty() == true) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0x40000000)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF00ADB5),
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color.Green,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = scanMessage ?: "",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Category Divider
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Biblioteca de Canciones",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                    val localCount = tracks.count { !it.url.startsWith("http") }
+                    Text(
+                        text = "$localCount locales • ${tracks.size - localCount} streaming",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        }
+
+        // 4. Songs catalog listing
         items(tracks) { track ->
             val isPlaying = currentTrack?.id == track.id && playerState is PlayerState.Playing
             val isSelected = currentTrack?.id == track.id
@@ -335,8 +493,10 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                 onToggleFavorite = { viewModel.toggleFavorite(track) }
             )
         }
+
+        // Spacer to clear the persistent bottom player
         item {
-            Spacer(modifier = Modifier.height(80.dp))
+            Spacer(modifier = Modifier.height(110.dp))
         }
     }
 }
@@ -774,6 +934,28 @@ fun AiAssistantTabContent(viewModel: MusicViewModel) {
     }
 }
 
+@Composable
+fun EqualizerIcon(modifier: Modifier = Modifier) {
+    val composition = rememberInfiniteTransition(label = "equalizer_anim")
+    val pulseScale by composition.animateFloat(
+        initialValue = 0.7f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
+    Icon(
+        imageVector = Icons.Default.Equalizer,
+        contentDescription = null,
+        tint = Color.White,
+        modifier = modifier
+            .size(24.dp)
+            .rotate(pulseScale * 30)
+    )
+}
+
 // --- List Composable Row Asset ---
 
 @Composable
@@ -813,23 +995,7 @@ fun TrackRowItem(
                 contentAlignment = Alignment.Center
             ) {
                 if (isPlaying) {
-                    val composition = rememberInfiniteTransition()
-                    val pulseScale by composition.animateFloat(
-                        initialValue = 0.7f,
-                        targetValue = 1.3f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(400, easing = LinearEasing),
-                            repeatMode = RepeatMode.Reverse
-                        )
-                    )
-                    Icon(
-                        imageVector = Icons.Default.Equalizer,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .rotate(pulseScale * 30)
-                    )
+                    EqualizerIcon()
                 } else {
                     val isLocal = !track.url.startsWith("http")
                     Icon(
@@ -901,16 +1067,24 @@ fun TrackRowItem(
 @Composable
 fun SoundwaveVisualizerCard(playerState: PlayerState) {
     val isPlaying = playerState is PlayerState.Playing
-    val transition = rememberInfiniteTransition()
+    if (isPlaying) {
+        AnimatedSoundwaveVisualizer()
+    } else {
+        StaticSoundwaveVisualizer()
+    }
+}
 
-    // High performance soundwave coordinates
+@Composable
+fun AnimatedSoundwaveVisualizer() {
+    val transition = rememberInfiniteTransition(label = "wave_anim")
     val waveOffset by transition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * Math.PI.toFloat(),
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
-        )
+        ),
+        label = "wave_offset"
     )
 
     Card(
@@ -936,14 +1110,7 @@ fun SoundwaveVisualizerCard(playerState: PlayerState) {
                 for (i in 0 until barCount) {
                     val x = i * (barWidth + barGap) + barWidth / 2f
                     val phase = i * 0.3f
-                    val scaleFactor = if (isPlaying) {
-                        // Create interactive sine-wave motion for each individual spectrum bar
-                        0.2f + 0.8f * kotlin.math.abs(sin(waveOffset + phase))
-                    } else {
-                        0.15f // Rested standard equalizer heights when paused
-                    }
-
-                    // Simulated audio frequencies
+                    val scaleFactor = 0.2f + 0.8f * kotlin.math.abs(sin(waveOffset + phase))
                     val barHeight = scaleFactor * (height * 0.6f)
                     val startY = midY - barHeight / 2f
                     val endY = midY + barHeight / 2f
@@ -958,7 +1125,56 @@ fun SoundwaveVisualizerCard(playerState: PlayerState) {
                 }
             }
             Text(
-                text = if (isPlaying) "REPRODUCIENDO" else "DETENIDO",
+                text = "REPRODUCIENDO",
+                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.5f),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun StaticSoundwaveVisualizer() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0x22000000)),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val midY = height / 2f
+                val barCount = 30
+                val barGap = 6.dp.toPx()
+                val totalGap = barGap * (barCount - 1)
+                val barWidth = (width - totalGap) / barCount
+
+                for (i in 0 until barCount) {
+                    val x = i * (barWidth + barGap) + barWidth / 2f
+                    val scaleFactor = 0.15f
+                    val barHeight = scaleFactor * (height * 0.6f)
+                    val startY = midY - barHeight / 2f
+                    val endY = midY + barHeight / 2f
+
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.15f + scaleFactor * 0.65f),
+                        start = Offset(x, startY),
+                        end = Offset(x, endY),
+                        strokeWidth = barWidth,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                }
+            }
+            Text(
+                text = "DETENIDO",
                 fontSize = 10.sp,
                 color = Color.White.copy(alpha = 0.5f),
                 fontWeight = FontWeight.Bold,
@@ -1121,12 +1337,13 @@ fun ExpandedPlayerSheet(
     )
 
     var staticRotation by remember { mutableStateOf(0f) }
-    val rotation = if (isPlaying) animatedRotation else {
-        remember(animatedRotation) {
-            staticRotation = animatedRotation
+    val currentRotationValue = animatedRotation
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) {
+            staticRotation = currentRotationValue
         }
-        staticRotation
     }
+    val rotation = if (isPlaying) animatedRotation else staticRotation
 
     Dialog(
         onDismissRequest = onDismiss,

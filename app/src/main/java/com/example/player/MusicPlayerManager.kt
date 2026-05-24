@@ -36,6 +36,30 @@ class MusicPlayerManager(
         initMediaPlayer()
     }
 
+    private fun safeIsPlaying(): Boolean {
+        return try {
+            mediaPlayer?.isPlaying ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun safeCurrentPosition(): Int {
+        return try {
+            mediaPlayer?.currentPosition ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    private fun safeDuration(): Int {
+        return try {
+            mediaPlayer?.duration ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     private fun initMediaPlayer() {
         mediaPlayer = MediaPlayer().apply {
             setAudioAttributes(
@@ -45,12 +69,18 @@ class MusicPlayerManager(
                     .build()
             )
             setOnPreparedListener { mp ->
-                _currentState.value = PlayerState.Playing(0, mp.duration)
-                mp.start()
+                val duration = safeDuration()
+                _currentState.value = PlayerState.Playing(0, duration)
+                try {
+                    mp.start()
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerManager", "Error starting player", e)
+                }
                 startTrackingProgress()
             }
             setOnCompletionListener {
-                _currentState.value = PlayerState.Playing(mediaPlayer?.duration ?: 0, mediaPlayer?.duration ?: 0)
+                val duration = safeDuration()
+                _currentState.value = PlayerState.Playing(duration, duration)
                 stopTrackingProgress()
                 onTrackCompleted()
             }
@@ -89,20 +119,28 @@ class MusicPlayerManager(
 
     fun pause() {
         mediaPlayer?.let {
-            if (it.isPlaying) {
-                it.pause()
+            if (safeIsPlaying()) {
+                try {
+                    it.pause()
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerManager", "Error pausing player", e)
+                }
                 stopTrackingProgress()
-                _currentState.value = PlayerState.Paused(it.currentPosition, it.duration)
+                _currentState.value = PlayerState.Paused(safeCurrentPosition(), safeDuration())
             }
         }
     }
 
     fun resume() {
         mediaPlayer?.let {
-            if (!it.isPlaying && _currentState.value is PlayerState.Paused) {
-                it.start()
+            if (!safeIsPlaying() && _currentState.value is PlayerState.Paused) {
+                try {
+                    it.start()
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerManager", "Error starting player in resume", e)
+                }
                 startTrackingProgress()
-                _currentState.value = PlayerState.Playing(it.currentPosition, it.duration)
+                _currentState.value = PlayerState.Playing(safeCurrentPosition(), safeDuration())
             }
         }
     }
@@ -111,8 +149,8 @@ class MusicPlayerManager(
         mediaPlayer?.let {
             try {
                 it.seekTo(positionMs)
-                val isPlaying = it.isPlaying
-                val duration = it.duration
+                val isPlaying = safeIsPlaying()
+                val duration = safeDuration()
                 if (isPlaying) {
                     _currentState.value = PlayerState.Playing(positionMs, duration)
                 } else {
@@ -128,10 +166,14 @@ class MusicPlayerManager(
         progressJob?.cancel()
         progressJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
-                mediaPlayer?.let { mp ->
-                    if (mp.isPlaying) {
-                        _currentState.value = PlayerState.Playing(mp.currentPosition, mp.duration)
+                try {
+                    if (safeIsPlaying()) {
+                        val currentPos = safeCurrentPosition()
+                        val duration = safeDuration()
+                        _currentState.value = PlayerState.Playing(currentPos, duration)
                     }
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerManager", "Exception in tracking loop", e)
                 }
                 delay(250) // Poll four times a second for highly responsive visual updates
             }
@@ -147,7 +189,11 @@ class MusicPlayerManager(
         stopTrackingProgress()
         mediaPlayer?.apply {
             try {
-                if (isPlaying) stop()
+                if (safeIsPlaying()) stop()
+            } catch (e: Exception) {
+                Log.e("MusicPlayerManager", "Error stopping player on release", e)
+            }
+            try {
                 release()
             } catch (e: Exception) {
                 Log.e("MusicPlayerManager", "Error releasing MediaPlayer", e)

@@ -243,77 +243,100 @@ class MusicViewModel(
         }
     }
 
-    fun scanLocalMusic() {
+    fun scanLocalMusic(customPath: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             _isScanning.value = true
-            _scanMessage.value = "Iniciando escaneo de carpetas..."
+            val isCustomPath = !customPath.isNullOrEmpty()
+            
+            if (isCustomPath) {
+                _scanMessage.value = "Verificando carpeta: $customPath"
+            } else {
+                _scanMessage.value = "Iniciando escaneo de carpetas..."
+            }
+            
             val audioList = mutableListOf<ScannedTrackEntity>()
 
-            // 1. Query Android MediaStore
-            try {
-                val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                val projection = arrayOf(
-                    MediaStore.Audio.Media._ID,
-                    MediaStore.Audio.Media.TITLE,
-                    MediaStore.Audio.Media.ARTIST,
-                    MediaStore.Audio.Media.DURATION,
-                    MediaStore.Audio.Media.DATA
-                )
-                val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
-                val contentResolver = getApplication<Application>().contentResolver
+            // 1. If NOT a custom path scan, query Android MediaStore as a solid baseline
+            if (!isCustomPath) {
+                try {
+                    val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    val projection = arrayOf(
+                        MediaStore.Audio.Media._ID,
+                        MediaStore.Audio.Media.TITLE,
+                        MediaStore.Audio.Media.ARTIST,
+                        MediaStore.Audio.Media.DURATION,
+                        MediaStore.Audio.Media.DATA
+                    )
+                    val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+                    val contentResolver = getApplication<Application>().contentResolver
 
-                contentResolver.query(uri, projection, selection, null, null)?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    contentResolver.query(uri, projection, selection, null, null)?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                        val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                        val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                        val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                        val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idCol)
-                        val title = cursor.getString(titleCol) ?: "Canción Desconocida"
-                        val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
-                        val duration = cursor.getInt(durationCol)
-                        val path = cursor.getString(dataCol) ?: ""
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getLong(idCol)
+                            val title = cursor.getString(titleCol) ?: "Canción Desconocida"
+                            val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
+                            val duration = cursor.getInt(durationCol)
+                            val path = cursor.getString(dataCol) ?: ""
 
-                        if (path.isNotEmpty()) {
-                            val trackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
-                            audioList.add(
-                                ScannedTrackEntity(
-                                    path = trackUri,
-                                    title = title,
-                                    artist = artist,
-                                    durationMs = if (duration > 0) duration else 180000
+                            if (path.isNotEmpty()) {
+                                val trackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+                                audioList.add(
+                                    ScannedTrackEntity(
+                                        path = trackUri,
+                                        title = title,
+                                        artist = artist,
+                                        durationMs = if (duration > 0) duration else 180000
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.e("MusicViewModel", "Error querying MediaStore", e)
                 }
-            } catch (e: Exception) {
-                Log.e("MusicViewModel", "Error querying MediaStore", e)
             }
 
-            _scanMessage.value = "Rebuscando carpetas físicas en el celular..."
-
-            // 2. Direct folder scanning as a backup/enhancement
+            // 2. Direct folder scanning
             val scannedFiles = mutableListOf<File>()
-            val parentDirs = listOf(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                Environment.getExternalStorageDirectory()
-            )
-
-            for (dir in parentDirs) {
-                if (dir != null && dir.exists() && dir.isDirectory) {
+            if (isCustomPath) {
+                val dir = File(customPath!!)
+                if (dir.exists() && dir.isDirectory) {
+                    _scanMessage.value = "Buscando archivos MP3 en ${dir.name}..."
                     searchMp3Files(dir, scannedFiles)
+                } else {
+                    _scanMessage.value = "Error: La carpeta '$customPath' no es válida o no existe."
+                    _isScanning.value = false
+                    return@launch
+                }
+            } else {
+                _scanMessage.value = "Buscando archivos en carpetas de Audio..."
+                val parentDirs = listOf(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    Environment.getExternalStorageDirectory()
+                )
+
+                for (dir in parentDirs) {
+                    if (dir != null && dir.exists() && dir.isDirectory) {
+                        searchMp3Files(dir, scannedFiles)
+                    }
                 }
             }
 
+            // 3. Process direct file matches and extract metadata
             if (scannedFiles.isNotEmpty()) {
                 val retriever = MediaMetadataRetriever()
-                for (file in scannedFiles) {
+                for ((index, file) in scannedFiles.withIndex()) {
                     // Check if file is duplicate of MediaStore paths (avoid double counting same track)
                     if (audioList.any { it.path == file.absolutePath }) continue
+
+                    _scanMessage.value = "Leyendo metadatos: ${index + 1}/${scannedFiles.size} canciones"
 
                     try {
                         retriever.setDataSource(file.absolutePath)
@@ -346,13 +369,19 @@ class MusicViewModel(
                 } catch (e: Exception) {}
             }
 
-            // 3. Save to database
+            // 4. Save found tracks to database (Incremental additions if scan is for custom path)
             if (audioList.isNotEmpty()) {
-                repository.clearScannedTracks()
+                if (!isCustomPath) {
+                    repository.clearScannedTracks()
+                }
                 repository.saveScannedTracks(audioList)
-                _scanMessage.value = "¡Actualizado! Se cargaron ${audioList.size} canciones locales."
+                _scanMessage.value = "¡Actualizado! Se encontraron ${audioList.size} canciones en total."
             } else {
-                _scanMessage.value = "No se encontraron carpetas con MP3 ni pistas en la biblioteca."
+                if (isCustomPath) {
+                    _scanMessage.value = "No se encontraron MP3s en $customPath"
+                } else {
+                    _scanMessage.value = "No se encontraron MP3s locales en el dispositivo."
+                }
             }
             _isScanning.value = false
         }
