@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00ADB5"
+        android:pathData="M 0,0 L 108,0 L 108,108 L 0,108 Z"
+        android:fillType="nonZero"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+    <!-- Beautiful bold centered double music note vector -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,22 L42,30 L42,65 C38,62 31,63 27,66 C22,70 21,77 25,81 C29,85 36,85 40,81 C44,77 45,71 45,67 L45,42 L68,36 L68,55 C64,52 57,53 53,56 C48,60 47,67 51,71 C55,75 62,75 66,71 C70,67 71,61 71,57 L71,22 Z" />
+</vector>

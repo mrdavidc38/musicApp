@@ -1,0 +1,6 @@
+{
+  "name": "Reproductor de Música",
+  "description": "Un reproductor de música premium con catálogo en streaming, ecualizador visual interactivo, favoritos locales con Room, y un asistente inteligente de playlist por IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
