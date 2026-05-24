@@ -6,6 +6,16 @@ class MusicRepository(private val musicDao: MusicDao) {
 
     val allFavorites: Flow<List<FavoriteTrackEntity>> = musicDao.getAllFavorites()
 
+    val allScannedTracks: Flow<List<ScannedTrackEntity>> = musicDao.getAllScannedTracks()
+
+    suspend fun saveScannedTracks(tracks: List<ScannedTrackEntity>) {
+        musicDao.insertScannedTracks(tracks)
+    }
+
+    suspend fun clearScannedTracks() {
+        musicDao.clearScannedTracks()
+    }
+
     fun getRecentHistory(limit: Int = 30): Flow<List<TrackHistoryEntity>> =
         musicDao.getRecentHistory(limit)
 

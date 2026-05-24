@@ -1,7 +1,9 @@
 package com.example.player
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +18,10 @@ sealed class PlayerState {
     data class Error(val message: String) : PlayerState()
 }
 
-class MusicPlayerManager(private val onTrackCompleted: () -> Unit) {
+class MusicPlayerManager(
+    private val context: Context,
+    private val onTrackCompleted: () -> Unit
+) {
     private var mediaPlayer: MediaPlayer? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var progressJob: Job? = null
@@ -68,7 +73,11 @@ class MusicPlayerManager(private val onTrackCompleted: () -> Unit) {
 
                 mediaPlayer?.apply {
                     reset()
-                    setDataSource(url)
+                    if (url.startsWith("content://")) {
+                        setDataSource(context, Uri.parse(url))
+                    } else {
+                        setDataSource(url)
+                    }
                     prepareAsync() 
                 }
             } catch (e: Exception) {

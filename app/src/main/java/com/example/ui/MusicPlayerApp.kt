@@ -206,18 +206,116 @@ fun MusicPlayerApp(viewModel: MusicViewModel) {
 
 @Composable
 fun ExplorerTabContent(viewModel: MusicViewModel) {
-    val tracks = TrackCatalog.tracks
+    val context = LocalContext.current
+    val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val scanMessage by viewModel.scanMessage.collectAsStateWithLifecycle()
+    val tracks by viewModel.allTracks.collectAsStateWithLifecycle()
+
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val favorites by viewModel.favoriteTracks.collectAsStateWithLifecycle()
 
-    Text(
-        text = "Biblioteca de Canciones",
-        fontSize = 16.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color.White.copy(alpha = 0.9f),
-        modifier = Modifier.padding(bottom = 8.dp)
-    )
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.values.all { it }
+        if (granted) {
+            viewModel.scanLocalMusic()
+        }
+    }
+
+    val requestAndScan = {
+        val permissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(android.Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        val hasPermission = permissions.all { perm ->
+            androidx.core.content.ContextCompat.checkSelfPermission(context, perm) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+
+        if (hasPermission) {
+            viewModel.scanLocalMusic()
+        } else {
+            permissionLauncher.launch(permissions)
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = "Biblioteca de Canciones",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+            val localCount = tracks.count { !it.url.startsWith("http") }
+            Text(
+                text = "$localCount locales • ${tracks.size - localCount} streaming",
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.5f)
+            )
+        }
+
+        Button(
+            onClick = { requestAndScan() },
+            enabled = !isScanning,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0x33FFFFFF),
+                contentColor = Color.White
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.height(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Actualizar",
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Escanear", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    if (isScanning || scanMessage?.isNotEmpty() == true) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0x40000000)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isScanning) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF00ADB5),
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color.Green,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = scanMessage ?: "",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
 
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -233,7 +331,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                 isSelected = isSelected,
                 isPlaying = isPlaying,
                 isFavorite = isFavorite,
-                onSelect = { viewModel.playTrack(track) },
+                onSelect = { viewModel.playTrack(track, tracks) },
                 onToggleFavorite = { viewModel.toggleFavorite(track) }
             )
         }
@@ -288,7 +386,7 @@ fun FavoritesTabContent(viewModel: MusicViewModel) {
             modifier = Modifier.fillMaxSize()
         ) {
             items(favorites) { fav ->
-                val track = TrackCatalog.getTrackByUrl(fav.trackUrl) ?: Track(
+                val track = viewModel.allTracks.value.find { it.url == fav.trackUrl } ?: TrackCatalog.getTrackByUrl(fav.trackUrl) ?: Track(
                     id = -1,
                     title = fav.title,
                     artist = fav.artist,
@@ -733,8 +831,9 @@ fun TrackRowItem(
                             .rotate(pulseScale * 30)
                     )
                 } else {
+                    val isLocal = !track.url.startsWith("http")
                     Icon(
-                        imageVector = Icons.Default.MusicNote,
+                        imageVector = if (isLocal) Icons.Default.FolderOpen else Icons.Default.MusicNote,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.8f),
                         modifier = Modifier.size(22.dp)
@@ -754,13 +853,25 @@ fun TrackRowItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = track.artist,
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isLocal = !track.url.startsWith("http")
+                    if (isLocal) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = "Archivo local",
+                            tint = Color(0xFF00ADB5),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = track.artist,
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // Interactive action layouts
