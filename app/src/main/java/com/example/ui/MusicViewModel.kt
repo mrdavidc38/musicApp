@@ -41,6 +41,48 @@ class MusicViewModel(
             TrackCatalog.tracks + localTracks
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks)
 
+    // --- Search & Audio Duration filter state ---
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _filterShortAudios = MutableStateFlow(false)
+    val filterShortAudios: StateFlow<Boolean> = _filterShortAudios.asStateFlow()
+
+    private val _minDurationLimitSeconds = MutableStateFlow(30)
+    val minDurationLimitSeconds: StateFlow<Int> = _minDurationLimitSeconds.asStateFlow()
+
+    val filteredTracks: StateFlow<List<Track>> = combine(
+        allTracks,
+        _searchQuery,
+        _filterShortAudios,
+        _minDurationLimitSeconds
+    ) { tracks, query, filterShort, minSecs ->
+        var list = tracks
+        if (filterShort) {
+            val limitMs = minSecs * 1000L
+            list = list.filter { it.durationMs >= limitMs }
+        }
+        if (query.isNotBlank()) {
+            list = list.filter {
+                it.title.contains(query, ignoreCase = true) ||
+                it.artist.contains(query, ignoreCase = true)
+            }
+        }
+        list
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun setFilterShortAudios(enabled: Boolean) {
+        _filterShortAudios.value = enabled
+    }
+
+    fun setMinDurationLimitSeconds(seconds: Int) {
+        _minDurationLimitSeconds.value = seconds
+    }
+
     // --- Active Playback Queue State ---
     private val _playbackQueue = MutableStateFlow<List<Track>>(TrackCatalog.tracks)
     val playbackQueue: StateFlow<List<Track>> = _playbackQueue.asStateFlow()
@@ -307,8 +349,8 @@ class MusicViewModel(
             if (isCustomPath) {
                 val dir = File(customPath!!)
                 if (dir.exists() && dir.isDirectory) {
-                    _scanMessage.value = "Buscando archivos MP3 en ${dir.name}..."
-                    searchMp3Files(dir, scannedFiles)
+                    _scanMessage.value = "Buscando archivos de audio en ${dir.name}..."
+                    searchAudioFiles(dir, scannedFiles)
                 } else {
                     _scanMessage.value = "Error: La carpeta '$customPath' no es válida o no existe."
                     _isScanning.value = false
@@ -324,7 +366,7 @@ class MusicViewModel(
 
                 for (dir in parentDirs) {
                     if (dir != null && dir.exists() && dir.isDirectory) {
-                        searchMp3Files(dir, scannedFiles)
+                        searchAudioFiles(dir, scannedFiles)
                     }
                 }
             }
@@ -353,7 +395,8 @@ class MusicViewModel(
                                 durationMs = duration
                             )
                         )
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
+                        Log.e("MusicViewModel", "Error leyendo metadatos de ${file.name}", e)
                         audioList.add(
                             ScannedTrackEntity(
                                 path = file.absolutePath,
@@ -378,25 +421,50 @@ class MusicViewModel(
                 _scanMessage.value = "¡Actualizado! Se encontraron ${audioList.size} canciones en total."
             } else {
                 if (isCustomPath) {
-                    _scanMessage.value = "No se encontraron MP3s en $customPath"
+                    _scanMessage.value = "No se encontraron archivos de audio en $customPath"
                 } else {
-                    _scanMessage.value = "No se encontraron MP3s locales en el dispositivo."
+                    _scanMessage.value = "No se encontraron archivos de audio locales en el dispositivo."
                 }
             }
             _isScanning.value = false
         }
     }
 
-    private fun searchMp3Files(dir: File, list: MutableList<File>) {
-        val files = dir.listFiles() ?: return
+    private fun searchAudioFiles(dir: File, list: MutableList<File>) {
+        val visited = mutableSetOf<String>()
+        searchAudioFilesRecursive(dir, list, visited, 0)
+    }
+
+    private fun searchAudioFilesRecursive(dir: File, list: MutableList<File>, visited: MutableSet<String>, depth: Int) {
+        if (depth > 10) return
+        if (list.size >= 100) return // Limit scanning items
+        val canonical = try { dir.canonicalPath } catch (e: Exception) { dir.absolutePath }
+        if (!visited.add(canonical)) return
+
+        val files = try {
+            dir.listFiles()
+        } catch (e: Exception) {
+            null
+        } ?: return
+
+        val supportedExtensions = listOf(".mp3", ".wav", ".aac", ".m4a", ".3gp", ".flac")
         for (file in files) {
-            if (file.isDirectory) {
-                if (!file.name.startsWith(".") && file.name != "Android") {
-                    searchMp3Files(file, list)
+            try {
+                if (file.isDirectory) {
+                    val name = file.name
+                    if (!name.startsWith(".") && name != "Android" && name != "cache" && name != "Self") {
+                        searchAudioFilesRecursive(file, list, visited, depth + 1)
+                    }
+                } else if (file.isFile) {
+                    val name = file.name
+                    val hasMatch = supportedExtensions.any { ext -> name.endsWith(ext, ignoreCase = true) }
+                    if (hasMatch) {
+                        list.add(file)
+                        if (list.size >= 100) return
+                    }
                 }
-            } else if (file.isFile && file.name.endsWith(".mp3", ignoreCase = true)) {
-                list.add(file)
-                if (list.size >= 100) return // Limit scanned directory items to prevent choking
+            } catch (e: Exception) {
+                // Gracefully ignore individual file issues safely
             }
         }
     }

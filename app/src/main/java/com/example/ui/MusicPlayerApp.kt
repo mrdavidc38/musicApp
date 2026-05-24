@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -209,7 +210,10 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
     val context = LocalContext.current
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanMessage by viewModel.scanMessage.collectAsStateWithLifecycle()
-    val tracks by viewModel.allTracks.collectAsStateWithLifecycle()
+    val tracks by viewModel.filteredTracks.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val filterShortAudios by viewModel.filterShortAudios.collectAsStateWithLifecycle()
+    val minDurationLimitSeconds by viewModel.minDurationLimitSeconds.collectAsStateWithLifecycle()
 
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
@@ -453,9 +457,199 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
             }
         }
 
+        // 2.5. Buscador y Filtro de Audio
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Header of search and filter section
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = Color(0xFF00ADB5),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Buscador y Filtro de Duración",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    // 1. Search Bar (Lupa text field)
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.setSearchQuery(it) },
+                        placeholder = { Text("Buscar por título o artista...", fontSize = 13.sp, color = Color.White.copy(alpha = 0.4f)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Buscar",
+                                tint = Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Limpiar búsqueda",
+                                        tint = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("music_search_input"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF00ADB5),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                            cursorColor = Color(0xFF00ADB5)
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = 0.1f))
+                    )
+
+                    // 2. Short Audio Excluder Filter Option
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Ocultar audios cortos (ej. WhatsApp)",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Filtra audios menores a un rango de tiempo",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            }
+                            Switch(
+                                checked = filterShortAudios,
+                                onCheckedChange = { viewModel.setFilterShortAudios(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color(0xFF00ADB5),
+                                    checkedTrackColor = Color(0xFF00ADB5).copy(alpha = 0.4f),
+                                    uncheckedThumbColor = Color.LightGray,
+                                    uncheckedTrackColor = Color.DarkGray
+                                ),
+                                modifier = Modifier.testTag("filter_short_audios_switch")
+                            )
+                        }
+
+                        // Slider to adjust range limit
+                        if (filterShortAudios) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Excluir menores a:",
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.width(130.dp)
+                                )
+                                Slider(
+                                    value = minDurationLimitSeconds.toFloat(),
+                                    onValueChange = { viewModel.setMinDurationLimitSeconds(it.toInt()) },
+                                    valueRange = 5f..180f,
+                                    steps = 34, // intervals of ~5s
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color(0xFF00ADB5),
+                                        activeTrackColor = Color(0xFF00ADB5),
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                    ),
+                                    modifier = Modifier.weight(1f).testTag("duration_filter_slider")
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${minDurationLimitSeconds}s",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00ADB5),
+                                    modifier = Modifier.width(40.dp)
+                                )
+                            }
+                            
+                            // Let's also include quick choice preset buttons! "15s", "30s", "1m"
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Ajuste rápido:",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                                listOf(15 to "15s", 30 to "30s", 60 to "1 Min", 120 to "2 Min").forEach { (secs, label) ->
+                                    val isSelected = minDurationLimitSeconds == secs
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                color = if (isSelected) Color(0xFF00ADB5) else Color.Transparent,
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isSelected) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                            .clickable { viewModel.setMinDurationLimitSeconds(secs) }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 3. Category Divider
         item {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1286,10 +1480,16 @@ fun MiniPlayerPanel(
 
             // Compact linear loader progress indicator line
             val progressWidth = when (playerState) {
-                is PlayerState.Playing -> playerState.progressMs.toFloat() / playerState.durationMs
-                is PlayerState.Paused -> playerState.progressMs.toFloat() / playerState.durationMs
+                is PlayerState.Playing -> {
+                    val duration = playerState.durationMs.coerceAtLeast(1)
+                    (playerState.progressMs.toFloat() / duration).coerceIn(0f, 1f)
+                }
+                is PlayerState.Paused -> {
+                    val duration = playerState.durationMs.coerceAtLeast(1)
+                    (playerState.progressMs.toFloat() / duration).coerceIn(0f, 1f)
+                }
                 else -> 0f
-            }.coerceIn(0f, 1f)
+            }
 
             Box(
                 modifier = Modifier
@@ -1337,6 +1537,7 @@ fun ExpandedPlayerSheet(
     )
 
     var staticRotation by remember { mutableStateOf(0f) }
+    var draggingProgress by remember { mutableStateOf<Float?>(null) }
     val currentRotationValue = animatedRotation
     LaunchedEffect(isPlaying) {
         if (!isPlaying) {
@@ -1492,12 +1693,19 @@ fun ExpandedPlayerSheet(
                 }.coerceAtLeast(1)
 
                 val progressNormalized = (progressMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                val currentProgressValue = draggingProgress ?: progressNormalized
 
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Slider(
-                        value = progressNormalized,
+                        value = currentProgressValue,
                         onValueChange = { value ->
-                            onSeek((value * durationMs).toInt())
+                            draggingProgress = value
+                        },
+                        onValueChangeFinished = {
+                            draggingProgress?.let { value ->
+                                onSeek((value * durationMs).toInt())
+                                draggingProgress = null
+                            }
                         },
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
@@ -1511,7 +1719,7 @@ fun ExpandedPlayerSheet(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = formatTime(progressMs),
+                            text = formatTime((currentProgressValue * durationMs).toInt()),
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 12.sp
                         )
