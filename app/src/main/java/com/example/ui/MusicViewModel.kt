@@ -36,26 +36,38 @@ class MusicViewModel(
     private val _scanMessage = MutableStateFlow<String?>(null)
     val scanMessage: StateFlow<String?> = _scanMessage.asStateFlow()
 
-    // --- Dynamic Scanned Tracks & Combined Catalog Flow with Deduplication ---
+    // --- Dynamic Scanned Tracks & Combined Catalog Flow with Absolute Deduplication ---
     val allTracks: StateFlow<List<Track>> = repository.allScannedTracks
         .map { scannedList ->
-            val localTracks = scannedList.mapIndexed { idx, scanned -> scanned.toTrack(idx) }
-            val combined = TrackCatalog.tracks + localTracks
-
-            // Strictly deduplicate by URL/path and by normalized (title + artist)
             val seenUrls = mutableSetOf<String>()
-            val seenNameKeys = mutableSetOf<String>()
+            val seenKeys = mutableSetOf<String>()
             val uniqueTracks = mutableListOf<Track>()
 
-            for (track in combined) {
+            // 1. Add demo tracks
+            for (track in TrackCatalog.tracks) {
                 val urlKey = track.url.trim().lowercase()
-                val nameKey = "${track.title.trim().lowercase()}_${track.artist.trim().lowercase()}"
-                
-                // Track is unique if its path hasn't been seen AND its title+artist hasn't been seen
-                if (seenUrls.add(urlKey) && seenNameKeys.add(nameKey)) {
+                val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+                val normArtist = track.artist.trim().lowercase()
+                val nameKey = "${normTitle}__${normArtist}"
+
+                if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
                     uniqueTracks.add(track)
                 }
             }
+
+            // 2. Add local scanned tracks without any duplicates
+            for (scanned in scannedList) {
+                val track = scanned.toTrack(uniqueTracks.size)
+                val urlKey = track.url.trim().lowercase()
+                val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+                val normArtist = track.artist.trim().lowercase()
+                val nameKey = "${normTitle}__${normArtist}"
+
+                if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
+                    uniqueTracks.add(track)
+                }
+            }
+
             uniqueTracks
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks)
 
@@ -297,17 +309,6 @@ class MusicViewModel(
         }
     }
 
-    fun clearAndCleanCatalog() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _isScanning.value = true
-            _scanMessage.value = "Limpiando catálogo y eliminando canciones duplicadas..."
-            repository.clearScannedTracks()
-            delay(300)
-            _scanMessage.value = "Catálogo limpiado. Ahora puedes volver a escanear limpiamente."
-            _isScanning.value = false
-        }
-    }
-
     fun scanLocalMusic(customPath: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             _isScanning.value = true
@@ -316,23 +317,48 @@ class MusicViewModel(
             if (isCustomPath) {
                 _scanMessage.value = "Verificando carpeta: $customPath"
             } else {
-                _scanMessage.value = "Iniciando escaneo de carpetas sin duplicados..."
+                _scanMessage.value = "Iniciando escaneo automático sin duplicados..."
             }
 
             val audioList = mutableListOf<ScannedTrackEntity>()
             val seenCanonicalPaths = mutableSetOf<String>()
             val seenTitleArtist = mutableSetOf<String>()
 
+            // Add demo tracks to duplicate filters
+            for (track in TrackCatalog.tracks) {
+                seenCanonicalPaths.add(track.url.trim().lowercase())
+                val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+                val normArtist = track.artist.trim().lowercase()
+                seenTitleArtist.add("${normTitle}__${normArtist}")
+            }
+
+            // If scanning a custom path, also load and keep existing tracks from DB
+            if (isCustomPath) {
+                val existing = repository.allScannedTracks.firstOrNull() ?: emptyList()
+                for (item in existing) {
+                    val canonical = try { File(item.path).canonicalPath.lowercase() } catch (e: Exception) { item.path.lowercase() }
+                    val normTitle = item.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+                    val normArtist = item.artist.trim().lowercase()
+                    val key = "${normTitle}__${normArtist}"
+
+                    if (seenCanonicalPaths.add(canonical) && seenTitleArtist.add(key)) {
+                        audioList.add(item)
+                    }
+                }
+            }
+
             fun addIfUnique(path: String, title: String, artist: String, duration: Int): Boolean {
                 val canonical = try { File(path).canonicalPath.lowercase() } catch (e: Exception) { path.lowercase() }
-                val normName = "${title.trim().lowercase()}_${artist.trim().lowercase()}"
+                val cleanTitle = title.trim().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").ifEmpty { "Canción Desconocida" }
+                val cleanArtist = artist.trim().ifEmpty { "Artista Desconocido" }
+                val normKey = "${cleanTitle.lowercase()}__${cleanArtist.lowercase()}"
 
-                if (seenCanonicalPaths.add(canonical) && seenTitleArtist.add(normName)) {
+                if (seenCanonicalPaths.add(canonical) && seenTitleArtist.add(normKey)) {
                     audioList.add(
                         ScannedTrackEntity(
                             path = path,
-                            title = title.trim().ifEmpty { "Canción Desconocida" },
-                            artist = artist.trim().ifEmpty { "Artista Desconocido" },
+                            title = cleanTitle,
+                            artist = cleanArtist,
                             durationMs = if (duration > 0) duration else 180000
                         )
                     )
@@ -439,13 +465,11 @@ class MusicViewModel(
                 } catch (e: Exception) {}
             }
 
-            // 4. Save found tracks to database without duplicates
+            // 4. Save found tracks to database (always clear and save deduplicated list)
             if (audioList.isNotEmpty()) {
-                if (!isCustomPath) {
-                    repository.clearScannedTracks()
-                }
+                repository.clearScannedTracks()
                 repository.saveScannedTracks(audioList)
-                _scanMessage.value = "¡Actualizado! Se encontraron ${audioList.size} canciones únicas sin duplicados."
+                _scanMessage.value = "¡Actualizado! ${audioList.size} canciones encontradas sin duplicados."
             } else {
                 if (isCustomPath) {
                     _scanMessage.value = "No se encontraron archivos de audio en $customPath"

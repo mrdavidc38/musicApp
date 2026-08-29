@@ -271,59 +271,88 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        // 1. Prominent Scan Options Card at the absolute top
+        // 1. Prominent Scan Options Card at the top
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+                colors = CardDefaults.cardColors(containerColor = Color(0x3312151D)),
                 shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x1FFFFFFF)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 6.dp)
+                    .padding(bottom = 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // Header with Icon badge
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.FolderOpen,
-                            contentDescription = null,
-                            tint = Color(0xFF00ADB5),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Buscador de Música Local",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0x2900ADB5), RoundedCornerShape(10.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = Color(0xFF00ADB5),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Escanear Música Local",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Añade tus canciones automáticamente sin duplicados",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
                     }
 
-                    Text(
-                        text = "Ubica carpetas específicas o realiza un escaneo completo de la memoria para cargar tus archivos MP3 locales.",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.7f),
-                        lineHeight = 16.sp
-                    )
-
-                    // Path Input Field
+                    // Path Input Field with clear button
                     OutlinedTextField(
                         value = customPathInput,
                         onValueChange = { customPathInput = it },
-                        label = { Text("Especificar carpeta a escanear", color = Color.White.copy(alpha = 0.6f)) },
-                        placeholder = { Text("/storage/emulated/0/Music", color = Color.White.copy(alpha = 0.4f)) },
+                        label = { Text("Carpeta a escanear", color = Color.White.copy(alpha = 0.6f)) },
+                        placeholder = { Text("/storage/emulated/0/Music", color = Color.White.copy(alpha = 0.35f)) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = Color(0xFF00ADB5),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (customPathInput.isNotEmpty()) {
+                                IconButton(onClick = { customPathInput = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Limpiar ruta",
+                                        tint = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = Color(0xFF00ADB5),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
                             cursorColor = Color(0xFF00ADB5),
                             focusedLabelColor = Color(0xFF00ADB5)
                         ),
@@ -331,51 +360,53 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                     )
 
                     // Quick Selection Folder Chips
-                    Text(
-                        text = "Accesos rápidos de carpetas:",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        val suggestions = listOf(
-                            "Música" to "/storage/emulated/0/Music",
-                            "Descargas" to "/storage/emulated/0/Download",
-                            "Memoria Raíz" to "/storage/emulated/0"
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Accesos rápidos:",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontWeight = FontWeight.Medium
                         )
-                        suggestions.forEach { (label, path) ->
-                            val isSelected = customPathInput.trim() == path
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        color = if (isSelected) Color(0xFF00ADB5) else Color(0x22FFFFFF),
-                                        shape = RoundedCornerShape(8.dp)
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            val suggestions = listOf(
+                                "Música" to "/storage/emulated/0/Music",
+                                "Descargas" to "/storage/emulated/0/Download",
+                                "Almacenamiento" to "/storage/emulated/0"
+                            )
+                            suggestions.forEach { (label, path) ->
+                                val isSelected = customPathInput.trim() == path
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(
+                                            color = if (isSelected) Color(0xFF00ADB5) else Color(0x1FFFFFFF),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { customPathInput = path }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.85f),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                     )
-                                    .clickable { customPathInput = path }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    // Scan trigger buttons
+                    // Action Buttons (2 distinct, spacious and clean)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Scan Custom Route Check
+                        // Scan Custom Route
                         Button(
                             onClick = {
                                 checkAndRequestPermissions {
@@ -388,8 +419,10 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                                 contentColor = Color.White,
                                 disabledContainerColor = Color(0x3300ADB5)
                             ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Folder,
@@ -399,12 +432,12 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Escanear Carpeta",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        // Complete storage sweep check
+                        // Complete storage sweep
                         Button(
                             onClick = {
                                 checkAndRequestPermissions {
@@ -413,12 +446,14 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                             },
                             enabled = !isScanning,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0x33FFFFFF),
+                                containerColor = Color(0x2EFFFFFF),
                                 contentColor = Color.White,
                                 disabledContainerColor = Color(0x11FFFFFF)
                             ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PhoneAndroid,
@@ -428,34 +463,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Escanear Todo",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // Clean catalog & delete duplicates
-                        Button(
-                            onClick = {
-                                viewModel.clearAndCleanCatalog()
-                            },
-                            enabled = !isScanning,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0x22FF5252),
-                                contentColor = Color(0xFFFF8A80),
-                                disabledContainerColor = Color(0x11FFFFFF)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.wrapContentWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteSweep,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Limpiar Duplicados",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
