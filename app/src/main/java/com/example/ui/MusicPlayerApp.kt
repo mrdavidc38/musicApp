@@ -432,6 +432,33 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                                 fontWeight = FontWeight.Bold
                             )
                         }
+
+                        // Clean catalog & delete duplicates
+                        Button(
+                            onClick = {
+                                viewModel.clearAndCleanCatalog()
+                            },
+                            enabled = !isScanning,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0x22FF5252),
+                                contentColor = Color(0xFFFF8A80),
+                                disabledContainerColor = Color(0x11FFFFFF)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.wrapContentWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteSweep,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Limpiar Duplicados",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -690,7 +717,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
         }
 
         // 4. Songs catalog listing
-        items(tracks) { track ->
+        items(tracks, key = { it.url }) { track ->
             val isPlaying = currentTrack?.id == track.id && playerState is PlayerState.Playing
             val isSelected = currentTrack?.id == track.id
             val isFavorite = favorites.any { it.trackUrl == track.url }

@@ -97,7 +97,7 @@ class MusicPlayerManager private constructor(private val context: Context) {
         }
     }
 
-    private fun safeIsPlaying(): Boolean {
+    fun safeIsPlaying(): Boolean {
         return try {
             mediaPlayer?.isPlaying ?: false
         } catch (e: Exception) {
@@ -105,7 +105,7 @@ class MusicPlayerManager private constructor(private val context: Context) {
         }
     }
 
-    private fun safeCurrentPosition(): Int {
+    fun safeCurrentPosition(): Int {
         return try {
             mediaPlayer?.currentPosition ?: 0
         } catch (e: Exception) {
@@ -113,7 +113,7 @@ class MusicPlayerManager private constructor(private val context: Context) {
         }
     }
 
-    private fun safeDuration(): Int {
+    fun safeDuration(): Int {
         return try {
             mediaPlayer?.duration ?: 0
         } catch (e: Exception) {

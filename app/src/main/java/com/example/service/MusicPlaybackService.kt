@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.*
 import android.graphics.drawable.Icon
+import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
@@ -37,6 +38,8 @@ class MusicPlaybackService : Service() {
         const val ACTION_PREV = "com.example.ACTION_PREV"
         const val ACTION_FORWARD = "com.example.ACTION_FORWARD"
         const val ACTION_REWIND = "com.example.ACTION_REWIND"
+        const val ACTION_SEEK = "com.example.ACTION_SEEK"
+        const val EXTRA_SEEK_POSITION = "extra_seek_position"
         const val ACTION_TOGGLE_REPEAT = "com.example.ACTION_TOGGLE_REPEAT"
         const val ACTION_STOP = "com.example.ACTION_STOP"
         const val ACTION_START_SERVICE = "com.example.ACTION_START_SERVICE"
@@ -139,7 +142,10 @@ class MusicPlaybackService : Service() {
         }
 
         serviceScope.launch {
-            playerManager.currentTrack.collectLatest {
+            playerManager.currentTrack.collectLatest { track ->
+                if (track != null) {
+                    updateMediaMetadata(track)
+                }
                 updateNotification()
             }
         }
@@ -148,6 +154,26 @@ class MusicPlaybackService : Service() {
             playerManager.repeatMode.collectLatest {
                 updateNotification()
             }
+        }
+    }
+
+    private fun updateMediaMetadata(track: Track) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val duration = if (track.durationMs > 0) track.durationMs.toLong() else playerManager.safeDuration().toLong().coerceAtLeast(180000L)
+            val trackBitmap = createTrackBitmap(track)
+            val metadata = MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, track.title)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, track.artist)
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, "Reproductor Musical")
+                .putString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST, track.artist)
+                .putString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE, track.title)
+                .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, track.artist)
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
+                .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, trackBitmap)
+                .putBitmap(MediaMetadata.METADATA_KEY_ART, trackBitmap)
+                .build()
+
+            mediaSession?.setMetadata(metadata)
         }
     }
 
@@ -167,6 +193,9 @@ class MusicPlaybackService : Service() {
                 else -> 0L
             }
 
+            val isPlaying = state is PlayerState.Playing
+            val playbackSpeed = if (isPlaying) 1.0f else 0.0f
+
             val actions = PlaybackState.ACTION_PLAY or
                     PlaybackState.ACTION_PAUSE or
                     PlaybackState.ACTION_PLAY_PAUSE or
@@ -179,7 +208,7 @@ class MusicPlaybackService : Service() {
 
             val playbackState = PlaybackState.Builder()
                 .setActions(actions)
-                .setState(stateCode, position, 1.0f)
+                .setState(stateCode, position, playbackSpeed)
                 .build()
 
             mediaSession?.setPlaybackState(playbackState)
@@ -191,6 +220,9 @@ class MusicPlaybackService : Service() {
         val state = playerManager.currentState.value
         val repeatMode = playerManager.repeatMode.value
         val isPlaying = state is PlayerState.Playing
+
+        updateMediaMetadata(track)
+        updatePlaybackState(state)
 
         val notification = buildNotification(track, isPlaying, repeatMode)
 
@@ -408,6 +440,12 @@ class MusicPlaybackService : Service() {
             ACTION_PREV -> playerManager.playPrevious()
             ACTION_FORWARD -> playerManager.forward(10000)
             ACTION_REWIND -> playerManager.rewind(10000)
+            ACTION_SEEK -> {
+                val pos = intent.getIntExtra(EXTRA_SEEK_POSITION, -1)
+                if (pos >= 0) {
+                    playerManager.seekTo(pos)
+                }
+            }
             ACTION_TOGGLE_REPEAT -> playerManager.toggleRepeatMode()
             ACTION_STOP -> {
                 playerManager.pause()

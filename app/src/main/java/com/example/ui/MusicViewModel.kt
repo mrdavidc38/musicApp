@@ -19,6 +19,7 @@ import com.example.player.MusicPlayerManager
 import com.example.player.PlayerState
 import com.example.player.RepeatMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -35,11 +36,27 @@ class MusicViewModel(
     private val _scanMessage = MutableStateFlow<String?>(null)
     val scanMessage: StateFlow<String?> = _scanMessage.asStateFlow()
 
-    // --- Dynamic Scanned Tracks & Combined Catalog Flow ---
+    // --- Dynamic Scanned Tracks & Combined Catalog Flow with Deduplication ---
     val allTracks: StateFlow<List<Track>> = repository.allScannedTracks
         .map { scannedList ->
             val localTracks = scannedList.mapIndexed { idx, scanned -> scanned.toTrack(idx) }
-            TrackCatalog.tracks + localTracks
+            val combined = TrackCatalog.tracks + localTracks
+
+            // Strictly deduplicate by URL/path and by normalized (title + artist)
+            val seenUrls = mutableSetOf<String>()
+            val seenNameKeys = mutableSetOf<String>()
+            val uniqueTracks = mutableListOf<Track>()
+
+            for (track in combined) {
+                val urlKey = track.url.trim().lowercase()
+                val nameKey = "${track.title.trim().lowercase()}_${track.artist.trim().lowercase()}"
+                
+                // Track is unique if its path hasn't been seen AND its title+artist hasn't been seen
+                if (seenUrls.add(urlKey) && seenNameKeys.add(nameKey)) {
+                    uniqueTracks.add(track)
+                }
+            }
+            uniqueTracks
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks)
 
     // --- Search & Audio Duration filter state ---
@@ -280,18 +297,49 @@ class MusicViewModel(
         }
     }
 
+    fun clearAndCleanCatalog() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanning.value = true
+            _scanMessage.value = "Limpiando catálogo y eliminando canciones duplicadas..."
+            repository.clearScannedTracks()
+            delay(300)
+            _scanMessage.value = "Catálogo limpiado. Ahora puedes volver a escanear limpiamente."
+            _isScanning.value = false
+        }
+    }
+
     fun scanLocalMusic(customPath: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             _isScanning.value = true
             val isCustomPath = !customPath.isNullOrEmpty()
-            
+
             if (isCustomPath) {
                 _scanMessage.value = "Verificando carpeta: $customPath"
             } else {
-                _scanMessage.value = "Iniciando escaneo de carpetas..."
+                _scanMessage.value = "Iniciando escaneo de carpetas sin duplicados..."
             }
-            
+
             val audioList = mutableListOf<ScannedTrackEntity>()
+            val seenCanonicalPaths = mutableSetOf<String>()
+            val seenTitleArtist = mutableSetOf<String>()
+
+            fun addIfUnique(path: String, title: String, artist: String, duration: Int): Boolean {
+                val canonical = try { File(path).canonicalPath.lowercase() } catch (e: Exception) { path.lowercase() }
+                val normName = "${title.trim().lowercase()}_${artist.trim().lowercase()}"
+
+                if (seenCanonicalPaths.add(canonical) && seenTitleArtist.add(normName)) {
+                    audioList.add(
+                        ScannedTrackEntity(
+                            path = path,
+                            title = title.trim().ifEmpty { "Canción Desconocida" },
+                            artist = artist.trim().ifEmpty { "Artista Desconocido" },
+                            durationMs = if (duration > 0) duration else 180000
+                        )
+                    )
+                    return true
+                }
+                return false
+            }
 
             // 1. If NOT a custom path scan, query Android MediaStore as a solid baseline
             if (!isCustomPath) {
@@ -319,19 +367,15 @@ class MusicViewModel(
                             val title = cursor.getString(titleCol) ?: "Canción Desconocida"
                             val artist = cursor.getString(artistCol) ?: "Artista Desconocido"
                             val duration = cursor.getInt(durationCol)
-                            val path = cursor.getString(dataCol) ?: ""
+                            val dataPath = cursor.getString(dataCol) ?: ""
 
-                            if (path.isNotEmpty()) {
-                                val trackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
-                                audioList.add(
-                                    ScannedTrackEntity(
-                                        path = trackUri,
-                                        title = title,
-                                        artist = artist,
-                                        durationMs = if (duration > 0) duration else 180000
-                                    )
-                                )
+                            val trackPath = if (dataPath.isNotEmpty() && File(dataPath).exists()) {
+                                dataPath
+                            } else {
+                                ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
                             }
+
+                            addIfUnique(trackPath, title, artist, duration)
                         }
                     }
                 } catch (e: Exception) {
@@ -339,13 +383,15 @@ class MusicViewModel(
                 }
             }
 
-            // 2. Direct folder scanning
+            // 2. Direct folder scanning with shared visited set across all root folders
             val scannedFiles = mutableListOf<File>()
+            val visitedDirs = mutableSetOf<String>()
+
             if (isCustomPath) {
                 val dir = File(customPath!!)
                 if (dir.exists() && dir.isDirectory) {
                     _scanMessage.value = "Buscando archivos de audio en ${dir.name}..."
-                    searchAudioFiles(dir, scannedFiles)
+                    searchAudioFilesRecursive(dir, scannedFiles, visitedDirs, 0)
                 } else {
                     _scanMessage.value = "Error: La carpeta '$customPath' no es válida o no existe."
                     _isScanning.value = false
@@ -353,15 +399,15 @@ class MusicViewModel(
                 }
             } else {
                 _scanMessage.value = "Buscando archivos en carpetas de Audio..."
-                val parentDirs = listOf(
+                val parentDirs = listOfNotNull(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                     Environment.getExternalStorageDirectory()
                 )
 
                 for (dir in parentDirs) {
-                    if (dir != null && dir.exists() && dir.isDirectory) {
-                        searchAudioFiles(dir, scannedFiles)
+                    if (dir.exists() && dir.isDirectory) {
+                        searchAudioFilesRecursive(dir, scannedFiles, visitedDirs, 0)
                     }
                 }
             }
@@ -370,8 +416,8 @@ class MusicViewModel(
             if (scannedFiles.isNotEmpty()) {
                 val retriever = MediaMetadataRetriever()
                 for ((index, file) in scannedFiles.withIndex()) {
-                    // Check if file is duplicate of MediaStore paths (avoid double counting same track)
-                    if (audioList.any { it.path == file.absolutePath }) continue
+                    val canonical = try { file.canonicalPath.lowercase() } catch (e: Exception) { file.absolutePath.lowercase() }
+                    if (seenCanonicalPaths.contains(canonical)) continue
 
                     _scanMessage.value = "Leyendo metadatos: ${index + 1}/${scannedFiles.size} canciones"
 
@@ -382,24 +428,10 @@ class MusicViewModel(
                         val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         val duration = durationStr?.toIntOrNull() ?: 180000
 
-                        audioList.add(
-                            ScannedTrackEntity(
-                                path = file.absolutePath,
-                                title = title,
-                                artist = artist,
-                                durationMs = duration
-                            )
-                        )
+                        addIfUnique(file.absolutePath, title, artist, duration)
                     } catch (e: Throwable) {
                         Log.e("MusicViewModel", "Error leyendo metadatos de ${file.name}", e)
-                        audioList.add(
-                            ScannedTrackEntity(
-                                path = file.absolutePath,
-                                title = file.nameWithoutExtension,
-                                artist = "Audio Local",
-                                durationMs = 180000
-                            )
-                        )
+                        addIfUnique(file.absolutePath, file.nameWithoutExtension, "Audio Local", 180000)
                     }
                 }
                 try {
@@ -407,13 +439,13 @@ class MusicViewModel(
                 } catch (e: Exception) {}
             }
 
-            // 4. Save found tracks to database (Incremental additions if scan is for custom path)
+            // 4. Save found tracks to database without duplicates
             if (audioList.isNotEmpty()) {
                 if (!isCustomPath) {
                     repository.clearScannedTracks()
                 }
                 repository.saveScannedTracks(audioList)
-                _scanMessage.value = "¡Actualizado! Se encontraron ${audioList.size} canciones en total."
+                _scanMessage.value = "¡Actualizado! Se encontraron ${audioList.size} canciones únicas sin duplicados."
             } else {
                 if (isCustomPath) {
                     _scanMessage.value = "No se encontraron archivos de audio en $customPath"
