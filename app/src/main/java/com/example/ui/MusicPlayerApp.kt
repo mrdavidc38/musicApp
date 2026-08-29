@@ -191,11 +191,15 @@ fun MusicPlayerApp(viewModel: MusicViewModel) {
                     track = currentTrack!!,
                     playerState = playerState,
                     isFavoriteFlow = viewModel.isCurrentTrackFavorite,
+                    repeatModeFlow = viewModel.repeatMode,
+                    isShuffleFlow = viewModel.isShuffle,
                     onToggleFavorite = { viewModel.toggleFavorite(currentTrack!!) },
                     onTogglePlay = { viewModel.togglePlayPause() },
                     onNext = { viewModel.playNext() },
                     onPrev = { viewModel.playPrevious() },
                     onSeek = { viewModel.seekTo(it) },
+                    onToggleRepeat = { viewModel.toggleRepeatMode() },
+                    onToggleShuffle = { viewModel.toggleShuffle() },
                     onDismiss = { viewModel.setPlayerExpanded(false) }
                 )
             }
@@ -1515,14 +1519,20 @@ fun ExpandedPlayerSheet(
     track: Track,
     playerState: PlayerState,
     isFavoriteFlow: StateFlow<Boolean>,
+    repeatModeFlow: StateFlow<com.example.player.RepeatMode>,
+    isShuffleFlow: StateFlow<Boolean>,
     onToggleFavorite: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onSeek: (Int) -> Unit,
+    onToggleRepeat: () -> Unit,
+    onToggleShuffle: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val isFavorite by isFavoriteFlow.collectAsStateWithLifecycle()
+    val repeatMode by repeatModeFlow.collectAsStateWithLifecycle()
+    val isShuffle by isShuffleFlow.collectAsStateWithLifecycle()
     val isPlaying = playerState is PlayerState.Playing
 
     // Dynamic rotation simulation animation for active vinyl play operations
@@ -1734,12 +1744,26 @@ fun ExpandedPlayerSheet(
                 // Button play bar controls setup triggers
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Shuffle button
+                    IconButton(
+                        onClick = onToggleShuffle,
+                        modifier = Modifier.size(48.dp).testTag("shuffle_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = if (isShuffle) "Aleatorio activado" else "Aleatorio desactivado",
+                            tint = if (isShuffle) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    // Previous button
                     IconButton(
                         onClick = onPrev,
-                        modifier = Modifier.size(56.dp).testTag("previous_button")
+                        modifier = Modifier.size(52.dp).testTag("previous_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipPrevious,
@@ -1768,9 +1792,10 @@ fun ExpandedPlayerSheet(
                         )
                     }
 
+                    // Next button
                     IconButton(
                         onClick = onNext,
-                        modifier = Modifier.size(56.dp).testTag("next_button")
+                        modifier = Modifier.size(52.dp).testTag("next_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipNext,
@@ -1779,7 +1804,37 @@ fun ExpandedPlayerSheet(
                             modifier = Modifier.size(36.dp)
                         )
                     }
+
+                    // Repeat Mode button
+                    IconButton(
+                        onClick = onToggleRepeat,
+                        modifier = Modifier.size(48.dp).testTag("repeat_mode_button")
+                    ) {
+                        val repeatIcon = when (repeatMode) {
+                            com.example.player.RepeatMode.ALL -> Icons.Default.Repeat
+                            com.example.player.RepeatMode.ONE -> Icons.Default.RepeatOne
+                            com.example.player.RepeatMode.OFF -> Icons.Default.Repeat
+                        }
+                        val repeatTint = when (repeatMode) {
+                            com.example.player.RepeatMode.ALL, com.example.player.RepeatMode.ONE -> Color(0xFF00ADB5)
+                            com.example.player.RepeatMode.OFF -> Color.White.copy(alpha = 0.5f)
+                        }
+                        Icon(
+                            imageVector = repeatIcon,
+                            contentDescription = repeatMode.getDisplayName(),
+                            tint = repeatTint,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
+
+                // Repeat Mode & Playback order indicator badge
+                Text(
+                    text = "${repeatMode.getDisplayName()} • ${if (isShuffle) "Modo Aleatorio" else "Orden Secuencial"}",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Medium
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
             }

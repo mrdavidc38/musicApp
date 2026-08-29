@@ -17,6 +17,7 @@ import com.example.api.PlaylistRecommendation
 import com.example.data.*
 import com.example.player.MusicPlayerManager
 import com.example.player.PlayerState
+import com.example.player.RepeatMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -83,20 +84,16 @@ class MusicViewModel(
         _minDurationLimitSeconds.value = seconds
     }
 
-    // --- Active Playback Queue State ---
-    private val _playbackQueue = MutableStateFlow<List<Track>>(TrackCatalog.tracks)
-    val playbackQueue: StateFlow<List<Track>> = _playbackQueue.asStateFlow()
-
-    private val _currentTrackIndex = MutableStateFlow(0)
-    val currentTrackIndex: StateFlow<Int> = _currentTrackIndex.asStateFlow()
-
-    // --- Player Core ---
-    private val playerManager = MusicPlayerManager(application) {
-        playNext()
-    }
+    // --- Player Core Singleton ---
+    private val playerManager = MusicPlayerManager.getInstance(application)
 
     val playerState: StateFlow<PlayerState> = playerManager.currentState
+    val currentTrack: StateFlow<Track?> = playerManager.currentTrack
     val currentTrackUrl: StateFlow<String?> = playerManager.currentTrackUrl
+    val playbackQueue: StateFlow<List<Track>> = playerManager.playbackQueue
+    val currentTrackIndex: StateFlow<Int> = playerManager.currentTrackIndex
+    val repeatMode: StateFlow<RepeatMode> = playerManager.repeatMode
+    val isShuffle: StateFlow<Boolean> = playerManager.isShuffle
 
     // --- Room Database Observers ---
     val favoriteTracks: StateFlow<List<FavoriteTrackEntity>> = repository.allFavorites
@@ -125,25 +122,27 @@ class MusicViewModel(
     private val _aiError = MutableStateFlow<String?>(null)
     val aiError: StateFlow<String?> = _aiError.asStateFlow()
 
-    // --- Active Track Helper ---
-    val currentTrack: StateFlow<Track?> = combine(currentTrackUrl, allTracks, _playbackQueue, _currentTrackIndex) { url, tracks, queue, index ->
-        url?.let { targetUrl ->
-            tracks.find { it.url == targetUrl } ?: TrackCatalog.getTrackByUrl(targetUrl)
-        } ?: queue.getOrNull(index)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks.first())
-
     // --- Check if Current Song is Favorite ---
     val isCurrentTrackFavorite: StateFlow<Boolean> = combine(currentTrack, favoriteTracks) { track, favorites ->
         track?.let { current -> favorites.any { it.trackUrl == current.url } } ?: false
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
+        playerManager.onTrackCompletedCallback = { completedTrack ->
+            addToHistory(completedTrack)
+        }
+
+        // Initialize default track if none is selected
+        if (playerManager.currentTrack.value == null && TrackCatalog.tracks.isNotEmpty()) {
+            playerManager.setQueue(TrackCatalog.tracks, 0)
+        }
+
         // Automatically sync system queue to all tracks when they change or start
         viewModelScope.launch {
             allTracks.collect { tracksList ->
-                // Only overwrite if playback queue is default catalog or empty
-                if (_playbackQueue.value == TrackCatalog.tracks || _playbackQueue.value.isEmpty()) {
-                    _playbackQueue.value = tracksList
+                if (tracksList.isNotEmpty() && (playerManager.playbackQueue.value == TrackCatalog.tracks || playerManager.playbackQueue.value.isEmpty())) {
+                    val currentIndex = playerManager.currentTrackIndex.value.coerceIn(0, (tracksList.size - 1).coerceAtLeast(0))
+                    playerManager.setQueue(tracksList, currentIndex)
                 }
             }
         }
@@ -163,47 +162,36 @@ class MusicViewModel(
 
     // --- Playback Controls ---
     fun playTrack(track: Track, customQueue: List<Track> = allTracks.value) {
-        _playbackQueue.value = customQueue
-        val index = customQueue.indexOfFirst { it.url == track.url }
-        _currentTrackIndex.value = if (index != -1) index else 0
-
-        playerManager.play(track.url)
+        playerManager.playTrack(track, customQueue)
         addToHistory(track)
     }
 
     fun togglePlayPause() {
-        when (val state = playerState.value) {
-            is PlayerState.Playing -> playerManager.pause()
-            is PlayerState.Paused -> playerManager.resume()
-            is PlayerState.Idle -> {
-                // If IDLE, start playing the currently selected track
-                currentTrack.value?.let { playTrack(it, _playbackQueue.value) }
-            }
-            else -> {}
-        }
+        playerManager.togglePlayPause()
     }
 
     fun playNext() {
-        val queue = _playbackQueue.value
-        if (queue.isEmpty()) return
-        val nextIndex = (_currentTrackIndex.value + 1) % queue.size
-        _currentTrackIndex.value = nextIndex
-        playTrack(queue[nextIndex], queue)
+        playerManager.playNext()
     }
 
     fun playPrevious() {
-        val queue = _playbackQueue.value
-        if (queue.isEmpty()) return
-        var prevIndex = _currentTrackIndex.value - 1
-        if (prevIndex < 0) {
-            prevIndex = queue.size - 1
-        }
-        _currentTrackIndex.value = prevIndex
-        playTrack(queue[prevIndex], queue)
+        playerManager.playPrevious()
     }
 
     fun seekTo(positionMs: Int) {
         playerManager.seekTo(positionMs)
+    }
+
+    fun toggleRepeatMode() {
+        playerManager.toggleRepeatMode()
+    }
+
+    fun setRepeatMode(mode: RepeatMode) {
+        playerManager.setRepeatMode(mode)
+    }
+
+    fun toggleShuffle() {
+        playerManager.toggleShuffle()
     }
 
     // --- Favorites management ---
@@ -274,8 +262,7 @@ class MusicViewModel(
 
                 if (recommendedTracks.isNotEmpty()) {
                     // Update active queue to matching tracks suggested by AI DJ
-                    _playbackQueue.value = recommendedTracks
-                    _currentTrackIndex.value = 0
+                    playerManager.setQueue(recommendedTracks, 0)
                 }
             } catch (e: Exception) {
                 _aiError.value = e.message ?: "Ocurrió un error inesperado al contactar con la IA."
@@ -471,7 +458,7 @@ class MusicViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        playerManager.release()
+        // PlayerManager is maintained as a long-lived player singleton so music playback continues in background.
     }
 }
 
