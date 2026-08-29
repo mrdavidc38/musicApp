@@ -182,6 +182,14 @@ class MusicViewModel(
         playerManager.seekTo(positionMs)
     }
 
+    fun forward(offsetMs: Int = 5000) {
+        playerManager.forward(offsetMs)
+    }
+
+    fun rewind(offsetMs: Int = 5000) {
+        playerManager.rewind(offsetMs)
+    }
+
     fun toggleRepeatMode() {
         playerManager.toggleRepeatMode()
     }

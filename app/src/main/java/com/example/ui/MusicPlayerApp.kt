@@ -6,6 +6,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +26,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -39,7 +44,10 @@ import com.example.data.Track
 import com.example.data.TrackCatalog
 import com.example.data.TrackHistoryEntity
 import com.example.player.PlayerState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.sin
@@ -78,6 +86,9 @@ fun MusicPlayerApp(viewModel: MusicViewModel) {
                         playerState = playerState,
                         onTogglePlay = { viewModel.togglePlayPause() },
                         onNext = { viewModel.playNext() },
+                        onPrev = { viewModel.playPrevious() },
+                        onForwardStep = { viewModel.forward(3000) },
+                        onRewindStep = { viewModel.rewind(3000) },
                         onClick = { viewModel.setPlayerExpanded(true) }
                     )
                 }
@@ -197,6 +208,8 @@ fun MusicPlayerApp(viewModel: MusicViewModel) {
                     onTogglePlay = { viewModel.togglePlayPause() },
                     onNext = { viewModel.playNext() },
                     onPrev = { viewModel.playPrevious() },
+                    onForwardStep = { viewModel.forward(3000) },
+                    onRewindStep = { viewModel.rewind(3000) },
                     onSeek = { viewModel.seekTo(it) },
                     onToggleRepeat = { viewModel.toggleRepeatMode() },
                     onToggleShuffle = { viewModel.toggleShuffle() },
@@ -1382,6 +1395,68 @@ fun StaticSoundwaveVisualizer() {
     }
 }
 
+// --- Holdable Media Button with long-press continuous seeking ---
+
+@Composable
+fun HoldableMediaButton(
+    onClick: () -> Unit,
+    onHoldStep: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White,
+    iconSize: androidx.compose.ui.unit.Dp = 36.dp,
+    containerSize: androidx.compose.ui.unit.Dp = 52.dp,
+    testTag: String = ""
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var isHolding by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isHolding) 1.25f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "holdScale"
+    )
+
+    Box(
+        modifier = modifier
+            .size(containerSize)
+            .clip(CircleShape)
+            .testTag(testTag)
+            .pointerInput(onClick, onHoldStep) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var didHold = false
+                    val holdJob = coroutineScope.launch {
+                        delay(350)
+                        didHold = true
+                        isHolding = true
+                        while (isActive) {
+                            onHoldStep()
+                            delay(180)
+                        }
+                    }
+                    val up = waitForUpOrCancellation()
+                    holdJob.cancel()
+                    isHolding = false
+                    if (!didHold && up != null) {
+                        onClick()
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (isHolding) Color(0xFF00ADB5) else tint,
+            modifier = Modifier
+                .size(iconSize)
+                .graphicsLayer(scaleX = scale, scaleY = scale)
+        )
+    }
+}
+
 // --- Mini player float control card ---
 
 @Composable
@@ -1390,6 +1465,9 @@ fun MiniPlayerPanel(
     playerState: PlayerState,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onForwardStep: () -> Unit,
+    onRewindStep: () -> Unit,
     onClick: () -> Unit
 ) {
     Card(
@@ -1449,6 +1527,18 @@ fun MiniPlayerPanel(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Previous (Hold to rewind)
+                    HoldableMediaButton(
+                        onClick = onPrev,
+                        onHoldStep = onRewindStep,
+                        icon = Icons.Default.SkipPrevious,
+                        contentDescription = "Anterior o mantener para retroceder",
+                        tint = Color.White,
+                        iconSize = 22.dp,
+                        containerSize = 36.dp,
+                        testTag = "mini_previous_button"
+                    )
+
                     // Play-Pause
                     IconButton(
                         onClick = onTogglePlay,
@@ -1465,20 +1555,17 @@ fun MiniPlayerPanel(
                         )
                     }
 
-                    // Next
-                    IconButton(
+                    // Next (Hold to forward)
+                    HoldableMediaButton(
                         onClick = onNext,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("next_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Siguiente",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                        onHoldStep = onForwardStep,
+                        icon = Icons.Default.SkipNext,
+                        contentDescription = "Siguiente o mantener para adelantar",
+                        tint = Color.White,
+                        iconSize = 22.dp,
+                        containerSize = 36.dp,
+                        testTag = "mini_next_button"
+                    )
                 }
             }
 
@@ -1525,6 +1612,8 @@ fun ExpandedPlayerSheet(
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrev: () -> Unit,
+    onForwardStep: () -> Unit,
+    onRewindStep: () -> Unit,
     onSeek: (Int) -> Unit,
     onToggleRepeat: () -> Unit,
     onToggleShuffle: () -> Unit,
@@ -1760,18 +1849,17 @@ fun ExpandedPlayerSheet(
                         )
                     }
 
-                    // Previous button
-                    IconButton(
+                    // Previous button with Hold-to-Rewind
+                    HoldableMediaButton(
                         onClick = onPrev,
-                        modifier = Modifier.size(52.dp).testTag("previous_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipPrevious,
-                            contentDescription = "Anterior",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
+                        onHoldStep = onRewindStep,
+                        icon = Icons.Default.SkipPrevious,
+                        contentDescription = "Anterior o mantener para retroceder",
+                        tint = Color.White,
+                        iconSize = 36.dp,
+                        containerSize = 52.dp,
+                        testTag = "previous_button"
+                    )
 
                     // Central glowing Play/Pause ring indicator circle Layout
                     Box(
@@ -1792,18 +1880,17 @@ fun ExpandedPlayerSheet(
                         )
                     }
 
-                    // Next button
-                    IconButton(
+                    // Next button with Hold-to-Forward
+                    HoldableMediaButton(
                         onClick = onNext,
-                        modifier = Modifier.size(52.dp).testTag("next_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Siguiente",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
+                        onHoldStep = onForwardStep,
+                        icon = Icons.Default.SkipNext,
+                        contentDescription = "Siguiente o mantener para adelantar",
+                        tint = Color.White,
+                        iconSize = 36.dp,
+                        containerSize = 52.dp,
+                        testTag = "next_button"
+                    )
 
                     // Repeat Mode button
                     IconButton(

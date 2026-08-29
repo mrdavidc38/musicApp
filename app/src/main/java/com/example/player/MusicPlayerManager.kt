@@ -382,6 +382,21 @@ class MusicPlayerManager private constructor(private val context: Context) {
         play(prevTrack.url)
     }
 
+    fun forward(offsetMs: Int = 5000) {
+        val current = safeCurrentPosition()
+        val duration = safeDuration()
+        if (duration > 0) {
+            val newPos = (current + offsetMs).coerceAtMost(duration)
+            seekTo(newPos)
+        }
+    }
+
+    fun rewind(offsetMs: Int = 5000) {
+        val current = safeCurrentPosition()
+        val newPos = (current - offsetMs).coerceAtLeast(0)
+        seekTo(newPos)
+    }
+
     fun seekTo(positionMs: Int) {
         mediaPlayer?.let {
             try {

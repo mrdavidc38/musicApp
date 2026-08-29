@@ -5,11 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.*
+import android.graphics.drawable.Icon
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
@@ -35,6 +35,8 @@ class MusicPlaybackService : Service() {
         const val ACTION_PLAY_PAUSE = "com.example.ACTION_PLAY_PAUSE"
         const val ACTION_NEXT = "com.example.ACTION_NEXT"
         const val ACTION_PREV = "com.example.ACTION_PREV"
+        const val ACTION_FORWARD = "com.example.ACTION_FORWARD"
+        const val ACTION_REWIND = "com.example.ACTION_REWIND"
         const val ACTION_TOGGLE_REPEAT = "com.example.ACTION_TOGGLE_REPEAT"
         const val ACTION_STOP = "com.example.ACTION_STOP"
         const val ACTION_START_SERVICE = "com.example.ACTION_START_SERVICE"
@@ -69,7 +71,7 @@ class MusicPlaybackService : Service() {
                 "Reproducción Multimedia",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Controles de reproducción y estado musical"
+                description = "Controles y símbolos de reproducción musical"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
@@ -98,6 +100,14 @@ class MusicPlaybackService : Service() {
                         playerManager.playPrevious()
                     }
 
+                    override fun onFastForward() {
+                        playerManager.forward(10000)
+                    }
+
+                    override fun onRewind() {
+                        playerManager.rewind(10000)
+                    }
+
                     override fun onSeekTo(pos: Long) {
                         playerManager.seekTo(pos.toInt())
                     }
@@ -105,6 +115,8 @@ class MusicPlaybackService : Service() {
                     override fun onCustomAction(action: String, extras: android.os.Bundle?) {
                         when (action) {
                             ACTION_TOGGLE_REPEAT -> playerManager.toggleRepeatMode()
+                            ACTION_FORWARD -> playerManager.forward(10000)
+                            ACTION_REWIND -> playerManager.rewind(10000)
                         }
                     }
 
@@ -160,6 +172,8 @@ class MusicPlaybackService : Service() {
                     PlaybackState.ACTION_PLAY_PAUSE or
                     PlaybackState.ACTION_SKIP_TO_NEXT or
                     PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                    PlaybackState.ACTION_FAST_FORWARD or
+                    PlaybackState.ACTION_REWIND or
                     PlaybackState.ACTION_SEEK_TO or
                     PlaybackState.ACTION_STOP
 
@@ -211,46 +225,109 @@ class MusicPlaybackService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Actions
+        // Pending Intents for transport symbols
         val prevPendingIntent = createActionPendingIntent(ACTION_PREV, 1)
         val playPausePendingIntent = createActionPendingIntent(ACTION_PLAY_PAUSE, 2)
         val nextPendingIntent = createActionPendingIntent(ACTION_NEXT, 3)
-        val repeatPendingIntent = createActionPendingIntent(ACTION_TOGGLE_REPEAT, 4)
+        val rewindPendingIntent = createActionPendingIntent(ACTION_REWIND, 4)
+        val forwardPendingIntent = createActionPendingIntent(ACTION_FORWARD, 5)
+        val repeatPendingIntent = createActionPendingIntent(ACTION_TOGGLE_REPEAT, 6)
 
-        val repeatIcon = when (repeatMode) {
+        val repeatIconRes = when (repeatMode) {
             RepeatMode.ALL -> R.drawable.ic_repeat
             RepeatMode.ONE -> R.drawable.ic_repeat_one
             RepeatMode.OFF -> R.drawable.ic_repeat_off
         }
 
-        val repeatTitle = repeatMode.getDisplayName()
-
-        val playPauseIcon = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow
-        val playPauseTitle = if (isPlaying) "Pausar" else "Reproducir"
-
+        val playPauseIconRes = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow
         val trackBitmap = createTrackBitmap(track)
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_music)
-            .setContentTitle(track.title)
-            .setContentText(track.artist)
-            .setSubText(repeatTitle)
-            .setLargeIcon(trackBitmap)
-            .setContentIntent(openAppPendingIntent)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOnlyAlertOnce(true)
-            .setOngoing(isPlaying)
-            .addAction(R.drawable.ic_skip_previous, "Anterior", prevPendingIntent)
-            .addAction(playPauseIcon, playPauseTitle, playPausePendingIntent)
-            .addAction(R.drawable.ic_skip_next, "Siguiente", nextPendingIntent)
-            .addAction(repeatIcon, repeatTitle, repeatPendingIntent)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
-            builder.setStyle(
-                NotificationCompat.DecoratedCustomViewStyle()
+        builder.apply {
+            setSmallIcon(R.drawable.ic_notification_music)
+            setContentTitle(track.title)
+            setContentText(track.artist)
+            setSubText(repeatMode.getDisplayName())
+            setLargeIcon(trackBitmap)
+            setContentIntent(openAppPendingIntent)
+            setVisibility(Notification.VISIBILITY_PUBLIC)
+            setOngoing(isPlaying)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                setCategory(Notification.CATEGORY_TRANSPORT)
+            }
+        }
+
+        // Add pure transport actions with symbol icons
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Action 0: Previous track symbol (⏮)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_skip_previous),
+                    "Anterior",
+                    prevPendingIntent
+                ).build()
             )
+            // Action 1: Play / Pause symbol (⏯)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, playPauseIconRes),
+                    if (isPlaying) "Pausa" else "Reproducir",
+                    playPausePendingIntent
+                ).build()
+            )
+            // Action 2: Next track symbol (⏭)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_skip_next),
+                    "Siguiente",
+                    nextPendingIntent
+                ).build()
+            )
+            // Action 3: Rewind 10s symbol (⏪)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_fast_rewind),
+                    "Retroceder 10s",
+                    rewindPendingIntent
+                ).build()
+            )
+            // Action 4: Forward 10s symbol (⏩)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_fast_forward),
+                    "Adelantar 10s",
+                    forwardPendingIntent
+                ).build()
+            )
+            // Action 5: Repeat mode symbol (🔁)
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, repeatIconRes),
+                    repeatMode.getDisplayName(),
+                    repeatPendingIntent
+                ).build()
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            builder.addAction(R.drawable.ic_skip_previous, "Anterior", prevPendingIntent)
+            @Suppress("DEPRECATION")
+            builder.addAction(playPauseIconRes, if (isPlaying) "Pausa" else "Reproducir", playPausePendingIntent)
+            @Suppress("DEPRECATION")
+            builder.addAction(R.drawable.ic_skip_next, "Siguiente", nextPendingIntent)
+        }
+
+        // Apply Android Native MediaStyle to show media transport symbols
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
+            val mediaStyle = Notification.MediaStyle()
+                .setMediaSession(mediaSession?.sessionToken)
+                .setShowActionsInCompactView(0, 1, 2)
+            builder.style = mediaStyle
         }
 
         return builder.build()
@@ -329,6 +406,8 @@ class MusicPlaybackService : Service() {
             ACTION_PLAY_PAUSE -> playerManager.togglePlayPause()
             ACTION_NEXT -> playerManager.playNext()
             ACTION_PREV -> playerManager.playPrevious()
+            ACTION_FORWARD -> playerManager.forward(10000)
+            ACTION_REWIND -> playerManager.rewind(10000)
             ACTION_TOGGLE_REPEAT -> playerManager.toggleRepeatMode()
             ACTION_STOP -> {
                 playerManager.pause()
