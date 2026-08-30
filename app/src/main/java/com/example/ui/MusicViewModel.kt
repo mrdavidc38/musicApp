@@ -24,6 +24,15 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 
+enum class TrackSortOrder(val displayName: String, val shortLabel: String) {
+    DEFAULT("Por defecto", "Defecto"),
+    DATE_DESC("Fecha (más recientes)", "Fecha ↓"),
+    DATE_ASC("Fecha (más antiguas)", "Fecha ↑"),
+    ARTIST_ASC("Artista (A - Z)", "Artista A-Z"),
+    ARTIST_DESC("Artista (Z - A)", "Artista Z-A"),
+    TITLE_ASC("Título (A - Z)", "Título A-Z")
+}
+
 class MusicViewModel(
     application: Application,
     private val repository: MusicRepository
@@ -36,42 +45,49 @@ class MusicViewModel(
     private val _scanMessage = MutableStateFlow<String?>(null)
     val scanMessage: StateFlow<String?> = _scanMessage.asStateFlow()
 
-    // --- Dynamic Scanned Tracks & Combined Catalog Flow with Absolute Deduplication ---
-    val allTracks: StateFlow<List<Track>> = repository.allScannedTracks
-        .map { scannedList ->
-            val seenUrls = mutableSetOf<String>()
-            val seenKeys = mutableSetOf<String>()
-            val uniqueTracks = mutableListOf<Track>()
+    // --- Dynamic Scanned Tracks & Combined Catalog Flow with Absolute Deduplication & Removal filtering ---
+    val allTracks: StateFlow<List<Track>> = combine(
+        repository.allScannedTracks,
+        repository.allRemovedTracks
+    ) { scannedList, removedList ->
+        val removedUrls = removedList.map { it.trackUrl.trim().lowercase() }.toSet()
+        val seenUrls = mutableSetOf<String>()
+        val seenKeys = mutableSetOf<String>()
+        val uniqueTracks = mutableListOf<Track>()
 
-            // 1. Add demo tracks
-            for (track in TrackCatalog.tracks) {
-                val urlKey = track.url.trim().lowercase()
-                val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
-                val normArtist = track.artist.trim().lowercase()
-                val nameKey = "${normTitle}__${normArtist}"
+        // 1. Add demo tracks (if not removed by user)
+        for (track in TrackCatalog.tracks) {
+            val urlKey = track.url.trim().lowercase()
+            if (removedUrls.contains(urlKey)) continue
 
-                if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
-                    uniqueTracks.add(track)
-                }
+            val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+            val normArtist = track.artist.trim().lowercase()
+            val nameKey = "${normTitle}__${normArtist}"
+
+            if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
+                uniqueTracks.add(track)
             }
+        }
 
-            // 2. Add local scanned tracks without any duplicates
-            for (scanned in scannedList) {
-                val track = scanned.toTrack(uniqueTracks.size)
-                val urlKey = track.url.trim().lowercase()
-                val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
-                val normArtist = track.artist.trim().lowercase()
-                val nameKey = "${normTitle}__${normArtist}"
+        // 2. Add local scanned tracks without any duplicates (if not removed by user)
+        for (scanned in scannedList) {
+            val urlKey = scanned.path.trim().lowercase()
+            if (removedUrls.contains(urlKey)) continue
 
-                if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
-                    uniqueTracks.add(track)
-                }
+            val track = scanned.toTrack(uniqueTracks.size)
+            val normTitle = track.title.trim().lowercase().replace(Regex("\\.(mp3|wav|aac|m4a|3gp|flac)$", RegexOption.IGNORE_CASE), "").trim()
+            val normArtist = track.artist.trim().lowercase()
+            val nameKey = "${normTitle}__${normArtist}"
+
+            if (seenUrls.add(urlKey) && seenKeys.add(nameKey)) {
+                uniqueTracks.add(track)
             }
+        }
 
-            uniqueTracks
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks)
+        uniqueTracks
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TrackCatalog.tracks)
 
-    // --- Search & Audio Duration filter state ---
+    // --- Search & Audio Duration & Sorting filter state ---
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
@@ -81,12 +97,23 @@ class MusicViewModel(
     private val _minDurationLimitSeconds = MutableStateFlow(30)
     val minDurationLimitSeconds: StateFlow<Int> = _minDurationLimitSeconds.asStateFlow()
 
+    private val _sortOrder = MutableStateFlow(TrackSortOrder.DEFAULT)
+    val sortOrder: StateFlow<TrackSortOrder> = _sortOrder.asStateFlow()
+
+    // --- Multi-Selection & Removal State ---
+    private val _isSelectionMode = MutableStateFlow(false)
+    val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
+
+    private val _selectedTrackUrls = MutableStateFlow<Set<String>>(emptySet())
+    val selectedTrackUrls: StateFlow<Set<String>> = _selectedTrackUrls.asStateFlow()
+
     val filteredTracks: StateFlow<List<Track>> = combine(
         allTracks,
         _searchQuery,
         _filterShortAudios,
-        _minDurationLimitSeconds
-    ) { tracks, query, filterShort, minSecs ->
+        _minDurationLimitSeconds,
+        _sortOrder
+    ) { tracks, query, filterShort, minSecs, sort ->
         var list = tracks
         if (filterShort) {
             val limitMs = minSecs * 1000L
@@ -98,7 +125,14 @@ class MusicViewModel(
                 it.artist.contains(query, ignoreCase = true)
             }
         }
-        list
+        when (sort) {
+            TrackSortOrder.DEFAULT -> list
+            TrackSortOrder.DATE_DESC -> list.sortedByDescending { it.timestamp }
+            TrackSortOrder.DATE_ASC -> list.sortedBy { it.timestamp }
+            TrackSortOrder.ARTIST_ASC -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.artist })
+            TrackSortOrder.ARTIST_DESC -> list.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.artist })
+            TrackSortOrder.TITLE_ASC -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setSearchQuery(query: String) {
@@ -111,6 +145,81 @@ class MusicViewModel(
 
     fun setMinDurationLimitSeconds(seconds: Int) {
         _minDurationLimitSeconds.value = seconds
+    }
+
+    fun setSortOrder(order: TrackSortOrder) {
+        _sortOrder.value = order
+    }
+
+    // --- Selection and Track Removal Methods ---
+    fun toggleSelectionMode(enabled: Boolean? = null) {
+        val newMode = enabled ?: !_isSelectionMode.value
+        _isSelectionMode.value = newMode
+        if (!newMode) {
+            _selectedTrackUrls.value = emptySet()
+        }
+    }
+
+    fun toggleTrackSelection(url: String) {
+        val current = _selectedTrackUrls.value.toMutableSet()
+        if (current.contains(url)) {
+            current.remove(url)
+        } else {
+            current.add(url)
+        }
+        _selectedTrackUrls.value = current
+        if (current.isNotEmpty() && !_isSelectionMode.value) {
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun selectAllVisibleTracks(tracks: List<Track>) {
+        val allUrls = tracks.map { it.url }.toSet()
+        if (_selectedTrackUrls.value.containsAll(allUrls) && _selectedTrackUrls.value.isNotEmpty()) {
+            _selectedTrackUrls.value = emptySet()
+        } else {
+            _selectedTrackUrls.value = allUrls
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun clearSelection() {
+        _selectedTrackUrls.value = emptySet()
+        _isSelectionMode.value = false
+    }
+
+    fun removeSelectedTracks(urlsToRemove: Set<String> = _selectedTrackUrls.value) {
+        if (urlsToRemove.isEmpty()) return
+        viewModelScope.launch {
+            val count = urlsToRemove.size
+            repository.markTracksAsRemoved(urlsToRemove.toList())
+
+            // Handle current playing track if removed
+            val currentPlaying = currentTrack.value
+            val wasPlayingRemoved = currentPlaying != null && urlsToRemove.contains(currentPlaying.url)
+
+            val updatedQueue = playerManager.playbackQueue.value.filterNot { urlsToRemove.contains(it.url) }
+            if (wasPlayingRemoved) {
+                if (updatedQueue.isNotEmpty()) {
+                    playerManager.setQueue(updatedQueue, 0)
+                    playerManager.play(updatedQueue.first().url)
+                } else {
+                    playerManager.pause()
+                    playerManager.setQueue(emptyList(), 0)
+                }
+            } else {
+                val currentIdx = updatedQueue.indexOfFirst { it.url == currentPlaying?.url }.coerceAtLeast(0)
+                playerManager.setQueue(updatedQueue, currentIdx)
+            }
+
+            _selectedTrackUrls.value = emptySet()
+            _isSelectionMode.value = false
+            _scanMessage.value = if (count == 1) "Se quitó 1 canción del reproductor" else "Se quitaron $count canciones del reproductor"
+        }
+    }
+
+    fun removeSingleTrack(track: Track) {
+        removeSelectedTracks(setOf(track.url))
     }
 
     // --- Player Core Singleton ---
@@ -541,7 +650,8 @@ fun ScannedTrackEntity.toTrack(index: Int): Track {
         durationMs = this.durationMs,
         description = "Música local escaneada de tu dispositivo.",
         primaryColor = Color(r, g, b),
-        secondaryColor = Color((r * 0.35).toInt(), (g * 0.35).toInt(), (b * 0.35).toInt())
+        secondaryColor = Color((r * 0.35).toInt(), (g * 0.35).toInt(), (b * 0.35).toInt()),
+        timestamp = this.timestamp
     )
 }
 

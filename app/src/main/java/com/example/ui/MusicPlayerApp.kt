@@ -2,10 +2,13 @@ package com.example.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -231,12 +234,18 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val filterShortAudios by viewModel.filterShortAudios.collectAsStateWithLifecycle()
     val minDurationLimitSeconds by viewModel.minDurationLimitSeconds.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+    val isSelectionMode by viewModel.isSelectionMode.collectAsStateWithLifecycle()
+    val selectedTrackUrls by viewModel.selectedTrackUrls.collectAsStateWithLifecycle()
 
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val favorites by viewModel.favoriteTracks.collectAsStateWithLifecycle()
 
     var customPathInput by remember { mutableStateOf("/storage/emulated/0/Music") }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var singleTrackToDelete by remember { mutableStateOf<Track?>(null) }
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
@@ -509,7 +518,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
             }
         }
 
-        // 2.5. Buscador y Filtro de Audio
+        // 2.5. Buscador y Filtro de Audio (con Ordenamiento por Fecha y Artista)
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
@@ -535,7 +544,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Buscador y Filtro de Duración",
+                            text = "Buscador, Filtro y Ordenamiento",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -580,6 +589,224 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                         textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
                     )
 
+                    // 2. Ordenamiento (Botón pequeño y bonito por Fecha / Artista)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Sort,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00ADB5),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Ordenar por:",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+
+                            // Botón pequeño y bonito con Menú Desplegable
+                            Box {
+                                Surface(
+                                    onClick = { sortMenuExpanded = true },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = Color(0x2E00ADB5),
+                                    border = BorderStroke(1.dp, Color(0xFF00ADB5).copy(alpha = 0.6f)),
+                                    modifier = Modifier.testTag("sort_button")
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = when (sortOrder) {
+                                                TrackSortOrder.DATE_DESC, TrackSortOrder.DATE_ASC -> Icons.Default.CalendarMonth
+                                                TrackSortOrder.ARTIST_ASC, TrackSortOrder.ARTIST_DESC -> Icons.Default.Person
+                                                TrackSortOrder.TITLE_ASC -> Icons.Default.SortByAlpha
+                                                TrackSortOrder.DEFAULT -> Icons.Default.Reorder
+                                            },
+                                            contentDescription = null,
+                                            tint = Color(0xFF00ADB5),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = sortOrder.shortLabel,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00ADB5),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                DropdownMenu(
+                                    expanded = sortMenuExpanded,
+                                    onDismissRequest = { sortMenuExpanded = false },
+                                    modifier = Modifier.background(Color(0xFF1E212D))
+                                ) {
+                                    TrackSortOrder.values().forEach { order ->
+                                        val isCurrent = sortOrder == order
+                                        DropdownMenuItem(
+                                            text = {
+                                                 Text(
+                                                     text = order.displayName,
+                                                     color = if (isCurrent) Color(0xFF00ADB5) else Color.White,
+                                                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                     fontSize = 13.sp
+                                                 )
+                                            },
+                                            leadingIcon = {
+                                                val icon = when (order) {
+                                                    TrackSortOrder.DATE_DESC, TrackSortOrder.DATE_ASC -> Icons.Default.CalendarMonth
+                                                    TrackSortOrder.ARTIST_ASC, TrackSortOrder.ARTIST_DESC -> Icons.Default.Person
+                                                    TrackSortOrder.TITLE_ASC -> Icons.Default.SortByAlpha
+                                                    TrackSortOrder.DEFAULT -> Icons.Default.Reorder
+                                                }
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    tint = if (isCurrent) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.6f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                viewModel.setSortOrder(order)
+                                                sortMenuExpanded = false
+                                            },
+                                            modifier = Modifier.testTag("sort_option_${order.name.lowercase()}")
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Botones de acceso rápido para ordenar con un solo toque
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Chip: Fecha
+                            val isDateActive = sortOrder == TrackSortOrder.DATE_DESC || sortOrder == TrackSortOrder.DATE_ASC
+                            Surface(
+                                onClick = {
+                                    if (sortOrder == TrackSortOrder.DATE_DESC) {
+                                        viewModel.setSortOrder(TrackSortOrder.DATE_ASC)
+                                    } else {
+                                        viewModel.setSortOrder(TrackSortOrder.DATE_DESC)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isDateActive) Color(0xFF00ADB5) else Color(0x15FFFFFF),
+                                border = BorderStroke(1.dp, if (isDateActive) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.15f)),
+                                modifier = Modifier.weight(1f).testTag("quick_sort_date")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarMonth,
+                                        contentDescription = null,
+                                        tint = if (isDateActive) Color.Black else Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (sortOrder == TrackSortOrder.DATE_ASC) "Fecha ↑" else "Fecha ↓",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDateActive) Color.Black else Color.White.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+
+                            // Chip: Artista
+                            val isArtistActive = sortOrder == TrackSortOrder.ARTIST_ASC || sortOrder == TrackSortOrder.ARTIST_DESC
+                            Surface(
+                                onClick = {
+                                    if (sortOrder == TrackSortOrder.ARTIST_ASC) {
+                                        viewModel.setSortOrder(TrackSortOrder.ARTIST_DESC)
+                                    } else {
+                                        viewModel.setSortOrder(TrackSortOrder.ARTIST_ASC)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isArtistActive) Color(0xFF00ADB5) else Color(0x15FFFFFF),
+                                border = BorderStroke(1.dp, if (isArtistActive) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.15f)),
+                                modifier = Modifier.weight(1f).testTag("quick_sort_artist")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isArtistActive) Color.Black else Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (sortOrder == TrackSortOrder.ARTIST_DESC) "Artista Z-A" else "Artista A-Z",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isArtistActive) Color.Black else Color.White.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+
+                            // Chip: Título
+                            val isTitleActive = sortOrder == TrackSortOrder.TITLE_ASC
+                            Surface(
+                                onClick = { viewModel.setSortOrder(TrackSortOrder.TITLE_ASC) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isTitleActive) Color(0xFF00ADB5) else Color(0x15FFFFFF),
+                                border = BorderStroke(1.dp, if (isTitleActive) Color(0xFF00ADB5) else Color.White.copy(alpha = 0.15f)),
+                                modifier = Modifier.weight(1f).testTag("quick_sort_title")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SortByAlpha,
+                                        contentDescription = null,
+                                        tint = if (isTitleActive) Color.Black else Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Título",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isTitleActive) Color.Black else Color.White.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -587,7 +814,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                             .background(Color.White.copy(alpha = 0.1f))
                     )
 
-                    // 2. Short Audio Excluder Filter Option
+                    // 3. Short Audio Excluder Filter Option
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -639,7 +866,7 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                                     value = minDurationLimitSeconds.toFloat(),
                                     onValueChange = { viewModel.setMinDurationLimitSeconds(it.toInt()) },
                                     valueRange = 5f..180f,
-                                    steps = 34, // intervals of ~5s
+                                    steps = 34,
                                     colors = SliderDefaults.colors(
                                         thumbColor = Color(0xFF00ADB5),
                                         activeTrackColor = Color(0xFF00ADB5),
@@ -657,7 +884,6 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
                                 )
                             }
                             
-                            // Let's also include quick choice preset buttons! "15s", "30s", "1m"
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -699,27 +925,168 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
             }
         }
 
-        // 3. Category Divider
+        // 3. Barra de Selección Múltiple y Administración de Canciones
         item {
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Biblioteca de Canciones",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.9f)
-                    )
-                    val localCount = tracks.count { !it.url.startsWith("http") }
-                    Text(
-                        text = "$localCount locales • ${tracks.size - localCount} streaming",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.5f)
-                    )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (isSelectionMode) {
+                // Barra de control de selección activa
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E212D)),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Color(0xFF00ADB5).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("selection_action_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00ADB5),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${selectedTrackUrls.size} seleccionada${if (selectedTrackUrls.size != 1) "s" else ""}",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            // Botón Salir / Cancelar selección
+                            IconButton(
+                                onClick = { viewModel.clearSelection() },
+                                modifier = Modifier.size(28.dp).testTag("cancel_selection_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Cancelar selección",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Botón Seleccionar Todo / Deseleccionar
+                            val isAllSelected = tracks.isNotEmpty() && selectedTrackUrls.size == tracks.size
+                            OutlinedButton(
+                                onClick = { viewModel.selectAllVisibleTracks(tracks) },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                                modifier = Modifier.weight(1f).testTag("select_all_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isAllSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isAllSelected) "Deseleccionar" else "Todas",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            // Botón Quitar canciones seleccionadas del reproductor
+                            Button(
+                                onClick = {
+                                    if (selectedTrackUrls.isNotEmpty()) {
+                                        singleTrackToDelete = null
+                                        showDeleteConfirmDialog = true
+                                    }
+                                },
+                                enabled = selectedTrackUrls.isNotEmpty(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFD32F2F),
+                                    disabledContainerColor = Color(0x33D32F2F)
+                                ),
+                                modifier = Modifier.weight(1.3f).testTag("remove_selected_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = if (selectedTrackUrls.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Quitar (${selectedTrackUrls.size})",
+                                    color = if (selectedTrackUrls.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.4f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Header normal con botón para iniciar selección
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Biblioteca de Canciones",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                        val localCount = tracks.count { !it.url.startsWith("http") }
+                        Text(
+                            text = "$localCount locales • ${tracks.size - localCount} streaming • ${tracks.size} en lista",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                    }
+
+                    // Botón estilizado para activar modo selección
+                    Surface(
+                        onClick = { viewModel.toggleSelectionMode(true) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0x1EFFFFFF),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                        modifier = Modifier.testTag("enable_selection_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Checklist,
+                                contentDescription = "Seleccionar canciones",
+                                tint = Color(0xFF00ADB5),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Seleccionar",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -729,14 +1096,34 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
             val isPlaying = currentTrack?.id == track.id && playerState is PlayerState.Playing
             val isSelected = currentTrack?.id == track.id
             val isFavorite = favorites.any { it.trackUrl == track.url }
+            val isChecked = selectedTrackUrls.contains(track.url)
 
             TrackRowItem(
                 track = track,
                 isSelected = isSelected,
                 isPlaying = isPlaying,
                 isFavorite = isFavorite,
-                onSelect = { viewModel.playTrack(track, tracks) },
-                onToggleFavorite = { viewModel.toggleFavorite(track) }
+                isSelectionMode = isSelectionMode,
+                isChecked = isChecked,
+                onSelect = {
+                    if (isSelectionMode) {
+                        viewModel.toggleTrackSelection(track.url)
+                    } else {
+                        viewModel.playTrack(track, tracks)
+                    }
+                },
+                onToggleFavorite = { viewModel.toggleFavorite(track) },
+                onToggleCheck = { viewModel.toggleTrackSelection(track.url) },
+                onLongClick = {
+                    if (!isSelectionMode) {
+                        viewModel.toggleSelectionMode(true)
+                        viewModel.toggleTrackSelection(track.url)
+                    }
+                },
+                onDeleteSingle = {
+                    singleTrackToDelete = track
+                    showDeleteConfirmDialog = true
+                }
             )
         }
 
@@ -744,6 +1131,77 @@ fun ExplorerTabContent(viewModel: MusicViewModel) {
         item {
             Spacer(modifier = Modifier.height(110.dp))
         }
+    }
+
+    // Diálogo de Confirmación para Quitar Canciones
+    if (showDeleteConfirmDialog) {
+        val count = if (singleTrackToDelete != null) 1 else selectedTrackUrls.size
+        val titleText = if (singleTrackToDelete != null) "¿Quitar canción del reproductor?" else "¿Quitar $count canciones?"
+        val bodyText = if (singleTrackToDelete != null) {
+            "¿Deseas quitar \"${singleTrackToDelete?.title}\" de ${singleTrackToDelete?.artist} del reproductor y la biblioteca?"
+        } else {
+            "¿Deseas quitar las $count canciones seleccionadas del reproductor y la biblioteca?"
+        }
+
+        AlertDialog(
+            onDismissRequest = {
+                showDeleteConfirmDialog = false
+                singleTrackToDelete = null
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DeleteOutline,
+                    contentDescription = null,
+                    tint = Color(0xFFE53935),
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = titleText,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+            },
+            text = {
+                Text(
+                    text = bodyText,
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (singleTrackToDelete != null) {
+                            viewModel.removeSingleTrack(singleTrackToDelete!!)
+                        } else {
+                            viewModel.removeSelectedTracks()
+                        }
+                        showDeleteConfirmDialog = false
+                        singleTrackToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    modifier = Modifier.testTag("confirm_remove_button")
+                ) {
+                    Text("Quitar", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        singleTrackToDelete = null
+                    },
+                    modifier = Modifier.testTag("cancel_remove_button")
+                ) {
+                    Text("Cancelar", color = Color.White.copy(alpha = 0.7f))
+                }
+            },
+            containerColor = Color(0xFF222831),
+            shape = RoundedCornerShape(18.dp)
+        )
     }
 }
 
@@ -1204,23 +1662,34 @@ fun EqualizerIcon(modifier: Modifier = Modifier) {
 
 // --- List Composable Row Asset ---
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRowItem(
     track: Track,
     isSelected: Boolean,
     isPlaying: Boolean,
     isFavorite: Boolean,
+    isSelectionMode: Boolean = false,
+    isChecked: Boolean = false,
     onSelect: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onToggleCheck: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    onDeleteSingle: (() -> Unit)? = null
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0x55FFFFFF) else Color(0x1BFFFFFF)
+            containerColor = if (isChecked) Color(0x3500ADB5) else if (isSelected) Color(0x55FFFFFF) else Color(0x1BFFFFFF)
         ),
         shape = RoundedCornerShape(14.dp),
+        border = if (isChecked) BorderStroke(1.5.dp, Color(0xFF00ADB5)) else null,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
+            .combinedClickable(
+                onClick = onSelect,
+                onLongClick = onLongClick
+            )
+            .testTag("track_row_${track.id}")
     ) {
         Row(
             modifier = Modifier
@@ -1228,6 +1697,20 @@ fun TrackRowItem(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Checkbox en modo selección
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isChecked,
+                    onCheckedChange = { onToggleCheck?.invoke() },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFF00ADB5),
+                        uncheckedColor = Color.White.copy(alpha = 0.6f),
+                        checkmarkColor = Color.White
+                    ),
+                    modifier = Modifier.padding(end = 6.dp).testTag("track_checkbox_${track.id}")
+                )
+            }
+
             // Stylized album art placeholder
             Box(
                 modifier = Modifier
@@ -1286,24 +1769,40 @@ fun TrackRowItem(
                 }
             }
 
-            // Interactive action layouts
-            IconButton(
-                onClick = onToggleFavorite,
-                modifier = Modifier.testTag("favorite_button_${track.id}")
-            ) {
+            if (!isSelectionMode) {
+                // Interactive action layouts
+                IconButton(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier.testTag("favorite_button_${track.id}")
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = "Favorito",
+                        tint = if (isFavorite) Color(0xFFD61C5D) else Color.White.copy(alpha = 0.6f)
+                    )
+                }
+
+                if (onDeleteSingle != null) {
+                    IconButton(
+                        onClick = onDeleteSingle,
+                        modifier = Modifier.size(36.dp).testTag("delete_single_${track.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Quitar del reproductor",
+                            tint = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
                 Icon(
-                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = "Favorito",
-                    tint = if (isFavorite) Color(0xFFD61C5D) else Color.White.copy(alpha = 0.6f)
+                    imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                    contentDescription = if (isPlaying) "Pausa" else "Reproducir",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
                 )
             }
-
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
-                contentDescription = if (isPlaying) "Pausa" else "Reproducir",
-                tint = Color.White,
-                modifier = Modifier.size(32.dp)
-            )
         }
     }
 }

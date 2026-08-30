@@ -25,8 +25,30 @@ interface MusicDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertScannedTracks(tracks: List<ScannedTrackEntity>)
 
+    @Query("DELETE FROM scanned_tracks WHERE path IN (:paths)")
+    suspend fun deleteScannedTracksByPaths(paths: List<String>)
+
+    @Query("DELETE FROM scanned_tracks WHERE path = :path")
+    suspend fun deleteScannedTrackByPath(path: String)
+
     @Query("DELETE FROM scanned_tracks")
     suspend fun clearScannedTracks()
+
+    // --- Removed Tracks (User excluded) ---
+    @Query("SELECT * FROM removed_tracks")
+    fun getAllRemovedTracks(): Flow<List<RemovedTrackEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRemovedTracks(tracks: List<RemovedTrackEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRemovedTrack(track: RemovedTrackEntity)
+
+    @Query("DELETE FROM removed_tracks WHERE trackUrl IN (:urls)")
+    suspend fun deleteRemovedTracks(urls: List<String>)
+
+    @Query("DELETE FROM removed_tracks")
+    suspend fun clearRemovedTracks()
 
     // --- History ---
     @Query("SELECT * FROM playback_history ORDER BY timestamp DESC LIMIT :limit")

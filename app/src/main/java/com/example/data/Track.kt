@@ -10,7 +10,8 @@ data class Track(
     val durationMs: Int,
     val description: String,
     val primaryColor: Color,
-    val secondaryColor: Color
+    val secondaryColor: Color,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 object TrackCatalog {
